@@ -413,7 +413,7 @@ namespace Barotrauma.Items.Components
                     if (!flashLowPower && character != null && character == Character.Controlled)
                     {
                         flashLowPower = true;
-                        GUI.PlayUISound(GUISoundType.PickItemFail);
+                        SoundPlayer.PlayUISound(GUISoundType.PickItemFail);
                     }
 #endif
                     return false;
@@ -451,7 +451,7 @@ namespace Barotrauma.Items.Components
                     {
                         flashNoAmmo = true;
                         failedLaunchAttempts = 0;
-                        GUI.PlayUISound(GUISoundType.PickItemFail);
+                        SoundPlayer.PlayUISound(GUISoundType.PickItemFail);
                     }
 #endif
                     return false;
