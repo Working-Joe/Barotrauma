@@ -9,6 +9,7 @@ using System.Threading;
 using System.Xml.Linq;
 using Microsoft.Xna.Framework.Input;
 using System.Threading.Tasks;
+using FarseerPhysics;
 #if DEBUG
 using System.IO;
 #else
@@ -92,6 +93,7 @@ namespace Barotrauma
         private GUIFrame hullVolumeFrame;
 
         private GUIFrame saveAssemblyFrame;
+        private GUIFrame saveStampFrame;
 
         const int PreviouslyUsedCount = 10;
         private GUIFrame previouslyUsedPanel;
@@ -316,6 +318,7 @@ namespace Barotrauma
                     previouslyUsedPanel.RectTransform.AbsoluteOffset = new Point(Math.Max(Math.Max(btn.Rect.X, entityCountPanel.Rect.Right), saveAssemblyFrame.Rect.Right), TopPanel.Rect.Height);
                     return true;
                 }
+
             };
 
             var undoBufferButton = new GUIButton(new RectTransform(new Vector2(0.9f, 0.9f), paddedTopPanel.RectTransform, scaleBasis: ScaleBasis.BothHeight), "", style: "UndoHistoryButton")
@@ -695,6 +698,20 @@ namespace Barotrauma
             };
             saveAssemblyFrame.RectTransform.MinSize = new Point(saveAssemblyFrame.Rect.Width, (int)(saveAssemblyButton.Rect.Height / saveAssemblyButton.RectTransform.RelativeSize.Y));
 
+            saveStampFrame = new GUIFrame(new RectTransform(new Vector2(0.08f, 0.5f), TopPanel.RectTransform, Anchor.BottomLeft, Pivot.TopLeft)
+            { MinSize = new Point((int)(250 * GUI.Scale), (int)(80 * GUI.Scale)), AbsoluteOffset = new Point((int)(10 * GUI.Scale), -saveAssemblyFrame.Rect.Height-entityCountPanel.Rect.Height - (int)(10 * GUI.Scale)) }, "InnerFrame")
+            {
+                Visible = false
+            };
+            var saveStampButton = new GUIButton(new RectTransform(new Vector2(0.9f, 0.8f), saveStampFrame.RectTransform, Anchor.Center), "Save as Stamp"); // TODO: ADD TEXT IN MANAGER
+            saveStampButton.TextBlock.AutoScaleHorizontal = true;
+            saveStampButton.OnClicked += (btn, userdata) =>
+            {
+                CreateSaveStampScreen(); 
+                return true;
+            };
+            saveStampFrame.RectTransform.MinSize = new Point(saveStampFrame.Rect.Width, (int)(saveStampButton.Rect.Height / saveStampButton.RectTransform.RelativeSize.Y));
+
 
             //Entity menu
             //------------------------------------------------
@@ -942,6 +959,45 @@ namespace Barotrauma
                                 };
                                 msgBox.Buttons[0].OnClicked += msgBox.Close;
                                 msgBox.Buttons[1].OnClicked += msgBox.Close;
+                            }
+
+                            return true;
+                        }
+                    };
+                }
+                if (ep.Category == MapEntityCategory.Stamp)
+                {
+                    var deleteButton = new GUIButton(new RectTransform(new Vector2(1.0f, 0.2f), paddedFrame.RectTransform, Anchor.BottomCenter) { MinSize = new Point(0, 20) },
+                        TextManager.Get("Delete"), style: "GUIButtonSmall")
+                    {
+                        UserData = ep,
+                        OnClicked = (btn, userData) =>
+                        {
+                            // Remove the asset from sub files
+                            ItemAssemblyPrefab assemblyPrefab = (ItemAssemblyPrefab)userData;
+                            if (assemblyPrefab != null)
+                            {
+                                // TODO
+                                //var msgBox = new GUIMessageBox(
+                                //   TextManager.Get("DeleteDialogLabel"),
+                                //   TextManager.GetWithVariable("DeleteDialogQuestion", "[file]", assemblyPrefab.Name),
+                                //   new[] { TextManager.Get("Yes"), TextManager.Get("Cancel") });
+                                //msgBox.Buttons[0].OnClicked += (deleteBtn, userData2) =>
+                                //{
+                                //    try
+                                //    {
+                                //        assemblyPrefab.Delete();
+                                //        UpdateEntityList();
+                                //        OpenEntityMenu(MapEntityCategory.ItemAssembly);
+                                //    }
+                                //    catch (Exception e)
+                                //    {
+                                //        DebugConsole.ThrowError(TextManager.GetWithVariable("DeleteFileError", "[file]", assemblyPrefab.Name), e);
+                                //    }
+                                //    return true;
+                                //};
+                                //msgBox.Buttons[0].OnClicked += msgBox.Close;
+                                //msgBox.Buttons[1].OnClicked += msgBox.Close;
                             }
 
                             return true;
@@ -1475,6 +1531,8 @@ namespace Barotrauma
                     try
                     {
                         previewImage.Sprite.Texture.SaveAsPng(imgStream, previewImage.Sprite.Texture.Width, previewImage.Sprite.Texture.Height);
+
+                        //System.IO.File.WriteAllBytes(savePath.Remove(savePath.Length - 4) + ".png", imgStream.ToArray());
                     }
                     catch (Exception e)
                     {
@@ -2197,6 +2255,65 @@ namespace Barotrauma
             };
         }
 
+        private void CreateSaveStampScreen()
+        {
+            SetMode(Mode.Default);
+
+            saveFrame = new GUIButton(new RectTransform(Vector2.One, GUI.Canvas, Anchor.Center), style: null)
+            {
+                OnClicked = (btn, userdata) => { if (GUI.MouseOn == btn || GUI.MouseOn == btn.TextBlock) saveFrame = null; return true; }
+            };
+
+            new GUIFrame(new RectTransform(GUI.Canvas.RelativeSize, saveFrame.RectTransform, Anchor.Center), style: "GUIBackgroundBlocker");
+
+            var innerFrame = new GUIFrame(new RectTransform(new Vector2(0.25f, 0.2f), saveFrame.RectTransform, Anchor.Center) { MinSize = new Point(400, 200) });
+            GUILayoutGroup paddedSaveFrame = new GUILayoutGroup(new RectTransform(new Vector2(0.9f, 0.9f), innerFrame.RectTransform, Anchor.Center))
+            {
+                AbsoluteSpacing = 5,
+                Stretch = true
+            };
+
+            // TODO: Add dialog to textmanager
+
+            new GUITextBlock(new RectTransform(new Vector2(1.0f, 0.0f), paddedSaveFrame.RectTransform),
+                "Save Stamp", font: GUI.LargeFont);
+            new GUITextBlock(new RectTransform(new Vector2(1.0f, 0.0f), paddedSaveFrame.RectTransform),
+                TextManager.Get("SaveItemAssemblyDialogName"));
+            nameBox = new GUITextBox(new RectTransform(new Vector2(0.6f, 0.1f), paddedSaveFrame.RectTransform));
+
+#if DEBUG
+            new GUITickBox(new RectTransform(new Vector2(1.0f, 0.1f), paddedSaveFrame.RectTransform), TextManager.Get("SaveItemAssemblyHideInMenus"))
+            {
+                UserData = "hideinmenus"
+            };
+#endif
+
+            //new GUITextBlock(new RectTransform(new Vector2(1.0f, 0.0f), paddedSaveFrame.RectTransform),
+            //    TextManager.Get("SaveItemAssemblyDialogDescription"));
+            //descriptionBox = new GUITextBox(new RectTransform(new Vector2(1.0f, 0.3f), paddedSaveFrame.RectTransform))
+            //{
+            //    UserData = "description",
+            //    Wrap = true,
+            //    Text = ""
+            //};
+
+            var buttonArea = new GUIFrame(new RectTransform(new Vector2(1.0f, 0.1f), paddedSaveFrame.RectTransform), style: null);
+            new GUIButton(new RectTransform(new Vector2(0.25f, 1.0f), buttonArea.RectTransform, Anchor.BottomLeft),
+                TextManager.Get("Cancel"))
+            {
+                OnClicked = (GUIButton btn, object userdata) =>
+                {
+                    saveFrame = null;
+                    return true;
+                }
+            };
+            new GUIButton(new RectTransform(new Vector2(0.25f, 1.0f), buttonArea.RectTransform, Anchor.BottomRight),
+                TextManager.Get("SaveSubButton"))
+            {
+                OnClicked = SaveStamp
+            };
+        }
+
         /// <summary>
         /// Loads an item assembly and only returns items which are not inside other inventories.
         /// This is to prevent us from trying to place for example Oxygen Tanks inside an inventory
@@ -2284,6 +2401,184 @@ namespace Barotrauma
                 doc.SaveSafe(filePath);
 #endif
                 new ItemAssemblyPrefab(filePath);
+                UpdateEntityList();
+            }
+
+            saveFrame = null;
+            return false;
+        }
+
+        private bool SaveStamp(GUIButton button, object obj)
+        {
+            if (string.IsNullOrWhiteSpace(nameBox.Text))
+            {
+                GUI.AddMessage(TextManager.Get("ItemAssemblyNameMissingWarning"), GUI.Style.Red);
+
+                nameBox.Flash();
+                return false;
+            }
+
+            foreach (char illegalChar in Path.GetInvalidFileNameChars())
+            {
+                if (nameBox.Text.Contains(illegalChar))
+                {
+                    GUI.AddMessage(TextManager.GetWithVariable("ItemAssemblyNameIllegalCharsWarning", "[illegalchar]", illegalChar.ToString()), GUI.Style.Red);
+                    nameBox.Flash();
+                    return false;
+                }
+            }
+
+            bool hideInMenus = !(nameBox.Parent.GetChildByUserData("hideinmenus") is GUITickBox hideInMenusTickBox) ? false : hideInMenusTickBox.Selected;
+
+            // Create Stamp Folder if not already existing
+#if DEBUG
+            string saveFolder = ItemAssemblyPrefab.VanillaSaveFolder;
+#else
+            string saveFolder = "Mods/Stamps";
+#endif
+            if (!Directory.Exists(saveFolder))
+            {
+                try
+                {
+                    Directory.CreateDirectory(saveFolder);
+                }
+                catch (Exception e)
+                {
+                    DebugConsole.ThrowError("Failed to create a directory for the stamp.", e);
+                    return false;
+                }
+            }
+
+            // Create mod XML (filelist) if not already existing
+            string mainXMLPath = saveFolder + "/fileList.xml";
+            if (!File.Exists(mainXMLPath))
+            {
+                // Create XML
+                XElement element = new XElement("contentpackage",
+                    new XAttribute("name", "stamps"),
+                    new XAttribute("gameversion", "0.10.0.0"),
+                    new XAttribute("corepackage", "false"),
+                    new XAttribute("path", mainXMLPath)
+                    );
+                XDocument doc = new XDocument(element);
+#if DEBUG
+                doc.Save(mainXMLPath);
+#else
+                doc.SaveSafe(mainXMLPath);
+#endif
+            }
+
+            // Create sub folder if not already existing
+            string subName = Submarine.MainSub.Info.Name;
+            string subFolder = saveFolder + "/" + subName;
+            if (!Directory.Exists(subFolder))
+            {
+                try
+                {
+                    Directory.CreateDirectory(subFolder);
+                }
+                catch (Exception e)
+                {
+                    DebugConsole.ThrowError("Failed to create a stamp directory for this submarine file.", e);
+                    return false;
+                }
+            }
+
+            // Create sub XML (filelist) if not already existing
+            string structureXMLPath = subFolder + "/" + subName + ".xml";
+            if (!File.Exists(structureXMLPath))
+            {
+                // Create XML
+                XElement element = new XElement("Override", new XElement("Structure", new XAttribute("path", subFolder)));
+                XDocument subDoc = new XDocument(element);
+#if DEBUG
+                subDoc.Save(structureXMLPath);
+#else
+                subDoc.SaveSafe(structureXMLPath);
+#endif
+                XDocument mainDoc = XMLExtensions.TryLoadXml(mainXMLPath);
+                mainDoc.Element("contentpackage").Add(new XElement("Structure", new XAttribute("file", structureXMLPath)));
+#if DEBUG
+                mainDoc.Save(mainXMLPath);
+#else
+                mainDoc.SaveSafe(mainXMLPath);
+#endif
+            }
+
+            // Save file
+            string structurePNGPath = subFolder + "/" + nameBox.Text + ".png";
+            if (File.Exists(structurePNGPath))
+            {
+                var msgBox = new GUIMessageBox(TextManager.Get("Warning"), "A stamp with this name already exists! Do you want to overwrite it?", new[] { TextManager.Get("Yes"), TextManager.Get("No") });
+                msgBox.Buttons[0].OnClicked = (btn, userdata) =>
+                {
+                    msgBox.Close();
+
+                    //TODO
+
+                    //Delete existing image
+
+                    Save();
+                    return true;
+                };
+                msgBox.Buttons[1].OnClicked = msgBox.Close;
+            }
+            else
+            {
+                Save();
+                return true;
+            }
+
+            void Save()
+            {
+                Vector2 dimensions = new Vector2(0, 0);
+                // Create and save image
+                using System.IO.MemoryStream imgStream = new System.IO.MemoryStream();
+                try
+                {
+                    dimensions = CreateStampImage(imgStream);
+
+                    System.IO.File.WriteAllBytes(structurePNGPath, imgStream.ToArray());
+                }
+                catch (Exception e)
+                {
+                    DebugConsole.ThrowError($"Saving the image for the stamp failed.", e);
+                }
+
+                // Unload files previously in XML
+                StructurePrefab.RemoveByFile(structureXMLPath);
+
+                // Add structure to sub XML
+                XElement structure = new XElement("structure",
+                    new XAttribute("name", nameBox.Text),
+                    new XAttribute("identifier", nameBox.Text),
+                    new XAttribute("body", "false"),
+                    new XAttribute("castshadow", "false"),
+                    new XAttribute("noaitarget", "true"),
+                    new XAttribute("category", "stamp"),
+                    new XAttribute("scale", "0.5")
+                    );
+                XElement sprite = new XElement("sprite",
+                    new XAttribute("texture", structurePNGPath), //nameBox.Text+".png"
+                    new XAttribute("depth", "0.03"),
+                    new XAttribute("sourcerect", "0,0," + dimensions.X + "," + dimensions.Y),
+                    new XAttribute("origin", "0.5,0.5")
+                    );
+
+                structure.Add(sprite);
+
+                XDocument structureDoc = XMLExtensions.TryLoadXml(structureXMLPath);
+                structureDoc.Element("Override").GetChildElement("Structure").Add(structure);
+#if DEBUG
+                structureDoc.Save(structureXMLPath);
+#else
+                structureDoc.SaveSafe(structureXMLPath);
+#endif
+                imgStream.Close();
+
+                // Load new structures in XML
+                ContentFile file = new ContentFile(structureXMLPath, ContentType.Structure);
+                StructurePrefab.LoadFromFile(file);
                 UpdateEntityList();
             }
 
@@ -3764,6 +4059,7 @@ namespace Barotrauma
             hullVolumeFrame.Visible = MapEntity.SelectedList.Any(s => s is Hull);
             hullVolumeFrame.RectTransform.AbsoluteOffset = new Point(Math.Max(showEntitiesPanel.Rect.Right, previouslyUsedPanel.Rect.Right), 0);
             saveAssemblyFrame.Visible = MapEntity.SelectedList.Count > 0;
+            saveStampFrame.Visible = MapEntity.SelectedList.Count > 0;
 
             var offset = cam.WorldView.Top - cam.ScreenToWorld(new Vector2(0, GameMain.GraphicsHeight - EntityMenu.Rect.Top)).Y;
 
@@ -4431,6 +4727,75 @@ namespace Barotrauma
             GUI.Draw(Cam, spriteBatch);
                                               
             spriteBatch.End();
+        }
+
+        private Vector2 CreateStampImage(System.IO.Stream stream)
+        {
+
+            // TODO: Move items
+
+            float minX = MapEntity.SelectedList[0].Rect.X, minY = MapEntity.SelectedList[0].Rect.Y - MapEntity.SelectedList[0].Rect.Height;
+            float maxX = MapEntity.SelectedList[0].Rect.Right, maxY = MapEntity.SelectedList[0].Rect.Y;
+
+            foreach (MapEntity e in MapEntity.SelectedList)
+            {
+                minX = Math.Min(minX, e.Rect.X);
+                minY = Math.Min(minY, e.Rect.Y - e.Rect.Height);
+                maxX = Math.Max(maxX, e.Rect.Right);
+                maxY = Math.Max(maxY, e.Rect.Y);
+            }
+
+            Rectangle stampDimensions = new Rectangle((int)minX, (int)minY, (int)(maxX - minX), (int)(maxY - minY));
+                        
+            //MapEntity.SelectedList.Clear();
+            foreach (MapEntity me in MapEntity.mapEntityList)
+            {
+                me.IsHighlighted = false;
+            }
+
+            var prevScissorRect = GameMain.Instance.GraphicsDevice.ScissorRectangle;
+
+            //Upscale rect to  width and height divisible by 4
+            stampDimensions.Width += (4 - stampDimensions.Width & 3) % 4;
+            stampDimensions.Height += (4 - stampDimensions.Height & 3) % 4;
+
+            // Calculate image dimensions at max zoom
+            int width = (int)(stampDimensions.Width*cam.MaxZoom);
+            int height = (int)(stampDimensions.Height*cam.MaxZoom);
+
+            Vector2 viewPos = stampDimensions.Center.ToVector2();
+            float scale = Math.Min(width / (float)stampDimensions.Width, height / (float)stampDimensions.Height);
+
+            var viewMatrix = Matrix.CreateTranslation(new Vector3(width / 2.0f, height / 2.0f, 0));
+            var transform = Matrix.CreateTranslation(
+                new Vector3(-viewPos.X, viewPos.Y, 0)) *
+                Matrix.CreateScale(new Vector3(scale, scale, 1)) *
+                viewMatrix;
+
+            using (RenderTarget2D rt = new RenderTarget2D(
+                 GameMain.Instance.GraphicsDevice,
+                 width, height, false, SurfaceFormat.Color, DepthFormat.None))
+            using (SpriteBatch spriteBatch = new SpriteBatch(GameMain.Instance.GraphicsDevice))
+            {
+                GameMain.Instance.GraphicsDevice.SetRenderTarget(rt);
+                GameMain.Instance.GraphicsDevice.Clear(new Color(0, 0, 0, 0));
+
+                spriteBatch.Begin(SpriteSortMode.BackToFront, BlendState.NonPremultiplied, null, null, null, null, transform);
+                Submarine.Draw(spriteBatch);
+                Submarine.DrawFront(spriteBatch);
+                Submarine.DrawDamageable(spriteBatch, null);
+                spriteBatch.End();
+
+
+                GameMain.Instance.GraphicsDevice.SetRenderTarget(null);
+                rt.SaveAsPng(stream, width, height);
+            }
+
+            //for some reason setting the rendertarget changes the size of the viewport 
+            //but it doesn't change back to default when setting it back to null
+            GameMain.Instance.ResetViewPort();
+
+            return new Vector2(width, height);
         }
 
         private void CreateImage(int width, int height, System.IO.Stream stream)

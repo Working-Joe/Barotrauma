@@ -10,7 +10,7 @@ namespace Barotrauma
     [Flags]
     enum MapEntityCategory
     {
-        Structure = 1, Decorative = 2, Machine = 4, Equipment = 8, Electrical = 16, Material = 32, Misc = 64, Alien = 128, Wrecked = 256, Thalamus = 512, ItemAssembly = 1024, Legacy = 2048
+        Structure = 1, Decorative = 2, Machine = 4, Equipment = 8, Electrical = 16, Material = 32, Misc = 64, Alien = 128, Wrecked = 256, Thalamus = 512, ItemAssembly = 1024, Legacy = 2048, Stamp = 4096
     }
 
     abstract partial class MapEntityPrefab : IPrefab, IDisposable
