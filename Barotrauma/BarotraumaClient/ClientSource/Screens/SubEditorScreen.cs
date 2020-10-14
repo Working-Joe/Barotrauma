@@ -10,6 +10,8 @@ using System.Xml.Linq;
 using Microsoft.Xna.Framework.Input;
 using System.Threading.Tasks;
 using FarseerPhysics;
+using System.Data.Common;
+using RestSharp.Extensions;
 #if DEBUG
 using System.IO;
 #else
@@ -967,42 +969,76 @@ namespace Barotrauma
                 }
                 if (ep.Category == MapEntityCategory.Stamp)
                 {
-                    var deleteButton = new GUIButton(new RectTransform(new Vector2(1.0f, 0.2f), paddedFrame.RectTransform, Anchor.BottomCenter) { MinSize = new Point(0, 20) },
-                        TextManager.Get("Delete"), style: "GUIButtonSmall")
+                    bool canDelete = false;
+                    StructurePrefab stamp = (StructurePrefab)ep;
+                    if (stamp != null)
                     {
-                        UserData = ep,
-                        OnClicked = (btn, userData) =>
+                        if (Submarine.MainSub != null)
                         {
-                            // Remove the asset from sub files
-                            ItemAssemblyPrefab assemblyPrefab = (ItemAssemblyPrefab)userData;
-                            if (assemblyPrefab != null)
+                            if (ep.FilePath.Contains(Submarine.MainSub.Info.Name))
                             {
-                                // TODO
-                                //var msgBox = new GUIMessageBox(
-                                //   TextManager.Get("DeleteDialogLabel"),
-                                //   TextManager.GetWithVariable("DeleteDialogQuestion", "[file]", assemblyPrefab.Name),
-                                //   new[] { TextManager.Get("Yes"), TextManager.Get("Cancel") });
-                                //msgBox.Buttons[0].OnClicked += (deleteBtn, userData2) =>
-                                //{
-                                //    try
-                                //    {
-                                //        assemblyPrefab.Delete();
-                                //        UpdateEntityList();
-                                //        OpenEntityMenu(MapEntityCategory.ItemAssembly);
-                                //    }
-                                //    catch (Exception e)
-                                //    {
-                                //        DebugConsole.ThrowError(TextManager.GetWithVariable("DeleteFileError", "[file]", assemblyPrefab.Name), e);
-                                //    }
-                                //    return true;
-                                //};
-                                //msgBox.Buttons[0].OnClicked += msgBox.Close;
-                                //msgBox.Buttons[1].OnClicked += msgBox.Close;
+                                canDelete = true;
                             }
+                        }                        
+                    }
 
-                            return true;
-                        }
-                    };
+                    if (canDelete)
+                    {
+                        var deleteButton = new GUIButton(new RectTransform(new Vector2(1.0f, 0.2f), paddedFrame.RectTransform, Anchor.BottomCenter) { MinSize = new Point(0, 20) },
+                            TextManager.Get("Delete"), style: "GUIButtonSmall")
+                        {
+                            UserData = ep,
+                            OnClicked = (btn, userData) =>
+                            {
+                                // TODO: Add text to manager
+                                var msgBox = new GUIMessageBox(
+                                   TextManager.Get("DeleteDialogLabel"),
+                                   TextManager.GetWithVariable("DeleteDialogQuestion", "[file]", stamp.Name) + " Warning: Deleting this structure will remove any uses from this sub file. If this change isn't saved the sub file may be corrupted.",
+                                   new[] { TextManager.Get("Yes"), TextManager.Get("Cancel") });
+                                msgBox.Buttons[0].OnClicked += (deleteBtn, userData2) =>
+                                {
+                                    try
+                                    {
+                                        // Remove the asset from current sub file
+                                        foreach (MapEntity e in MapEntity.mapEntityList.OrderBy(e => e.ID))
+                                        {
+                                            if (e.prefab.Identifier == stamp.Identifier)
+                                            {
+                                                e.Remove();
+                                            }
+                                        }
+
+                                        // Delete structure from XML and delete PNG
+                                        XDocument structureDoc = XMLExtensions.TryLoadXml(stamp.FilePath);
+
+                                        XElement structureElement = structureDoc.Element("Override").GetChildElement("Structure").Elements().First(e => e.Attribute("identifier").Value == stamp.Identifier);
+
+                                        System.IO.File.Delete(structureElement.GetChildElement("sprite").Attribute("texture").Value);
+
+                                        structureElement.Remove();
+#if DEBUG
+                                            structureDoc.Save(structureXMLPath);
+#else
+                                        structureDoc.SaveSafe(stamp.FilePath);
+#endif
+                                        stamp.Dispose();
+
+                                        UpdateEntityList();
+                                        OpenEntityMenu(MapEntityCategory.Stamp);
+                                    }
+                                    catch (Exception e)
+                                    {
+                                        DebugConsole.ThrowError(TextManager.GetWithVariable("DeleteFileError", "[file]", stamp.Name), e);
+                                    }
+                                    return true;
+                                };
+                                msgBox.Buttons[0].OnClicked += msgBox.Close;
+                                msgBox.Buttons[1].OnClicked += msgBox.Close;
+
+                                return true;
+                            }
+                        };
+                    }
                 }
                 paddedFrame.Recalculate();
                 if (img != null)
@@ -2430,6 +2466,104 @@ namespace Barotrauma
 
             bool hideInMenus = !(nameBox.Parent.GetChildByUserData("hideinmenus") is GUITickBox hideInMenusTickBox) ? false : hideInMenusTickBox.Selected;
 
+            // Ensure all prerequisite folders/files exist
+            string subName = Submarine.MainSub.Info.Name;
+            UpdateFolderStructure(subName);
+
+            // Save file
+            string saveFolder = "Mods/Stamps";
+            string subFolder = saveFolder + "/" + subName;
+            string structurePNGPath = subFolder + "/" + nameBox.Text + ".png";
+            string structureXMLPath = subFolder + "/" + subName + ".xml";
+            if (File.Exists(structurePNGPath))
+            {
+                var msgBox = new GUIMessageBox(TextManager.Get("Warning"), "A stamp with this name already exists! Do you want to overwrite it?", new[] { TextManager.Get("Yes"), TextManager.Get("No") });
+                msgBox.Buttons[0].OnClicked = (btn, userdata) =>
+                {
+                    msgBox.Close();
+
+                    //TODO
+
+                    //Delete existing image
+
+                    Save();
+                    return true;
+                };
+                msgBox.Buttons[1].OnClicked = msgBox.Close;
+            }
+            else
+            {
+                Save();
+            }
+
+            void Save()
+            {
+                Vector2 dimensions = new Vector2(0, 0);
+                // Create and save image
+                using System.IO.MemoryStream imgStream = new System.IO.MemoryStream();
+                try
+                {
+                    dimensions = CreateStampImage(imgStream);
+
+                    System.IO.File.WriteAllBytes(structurePNGPath, imgStream.ToArray());
+                }
+                catch (Exception e)
+                {
+                    DebugConsole.ThrowError($"Saving the image for the stamp failed.", e);
+                    return;
+                }
+
+                // Unload files previously in XML
+                StructurePrefab.RemoveByFile(structureXMLPath);
+
+                // Add structure to sub XML
+                XElement structure = new XElement("structure",
+                    new XAttribute("name", nameBox.Text),
+                    new XAttribute("identifier", nameBox.Text),
+                    new XAttribute("body", "false"),
+                    new XAttribute("castshadow", "false"),
+                    new XAttribute("noaitarget", "true"),
+                    new XAttribute("category", "stamp"),
+                    new XAttribute("scale", "0.5")
+                    );
+                XElement sprite = new XElement("sprite",
+                    new XAttribute("texture", structurePNGPath), //nameBox.Text+".png"
+                    new XAttribute("depth", "0.03"),
+                    new XAttribute("sourcerect", "0,0," + dimensions.X + "," + dimensions.Y),
+                    new XAttribute("origin", "0.5,0.5")
+                    );
+
+                structure.Add(sprite);
+                try
+                {
+                    XDocument structureDoc = XMLExtensions.TryLoadXml(structureXMLPath);
+                    structureDoc.Element("Override").GetChildElement("Structure").Add(structure);
+#if DEBUG
+                structureDoc.Save(structureXMLPath);
+#else
+                    structureDoc.SaveSafe(structureXMLPath);
+#endif
+                    imgStream.Close();
+                }
+                catch (Exception e)
+                {
+                    DebugConsole.ThrowError("Failed to update stamp XML at " + structureXMLPath, e);
+                    return;
+                }
+
+                // Load new structures in XML
+                ContentFile file = new ContentFile(structureXMLPath, ContentType.Structure);
+                StructurePrefab.LoadFromFile(file);
+                UpdateEntityList();
+                OpenEntityMenu(MapEntityCategory.Stamp);
+            }
+
+            saveFrame = null;
+            return false;
+        }
+
+        private bool UpdateFolderStructure(string newSubName)
+        {
             // Create Stamp Folder if not already existing
 #if DEBUG
             string saveFolder = ItemAssemblyPrefab.VanillaSaveFolder;
@@ -2469,8 +2603,7 @@ namespace Barotrauma
             }
 
             // Create sub folder if not already existing
-            string subName = Submarine.MainSub.Info.Name;
-            string subFolder = saveFolder + "/" + subName;
+            string subFolder = saveFolder + "/" + newSubName;
             if (!Directory.Exists(subFolder))
             {
                 try
@@ -2485,7 +2618,7 @@ namespace Barotrauma
             }
 
             // Create sub XML (filelist) if not already existing
-            string structureXMLPath = subFolder + "/" + subName + ".xml";
+            string structureXMLPath = subFolder + "/" + newSubName + ".xml";
             if (!File.Exists(structureXMLPath))
             {
                 // Create XML
@@ -2505,85 +2638,7 @@ namespace Barotrauma
 #endif
             }
 
-            // Save file
-            string structurePNGPath = subFolder + "/" + nameBox.Text + ".png";
-            if (File.Exists(structurePNGPath))
-            {
-                var msgBox = new GUIMessageBox(TextManager.Get("Warning"), "A stamp with this name already exists! Do you want to overwrite it?", new[] { TextManager.Get("Yes"), TextManager.Get("No") });
-                msgBox.Buttons[0].OnClicked = (btn, userdata) =>
-                {
-                    msgBox.Close();
-
-                    //TODO
-
-                    //Delete existing image
-
-                    Save();
-                    return true;
-                };
-                msgBox.Buttons[1].OnClicked = msgBox.Close;
-            }
-            else
-            {
-                Save();
-                return true;
-            }
-
-            void Save()
-            {
-                Vector2 dimensions = new Vector2(0, 0);
-                // Create and save image
-                using System.IO.MemoryStream imgStream = new System.IO.MemoryStream();
-                try
-                {
-                    dimensions = CreateStampImage(imgStream);
-
-                    System.IO.File.WriteAllBytes(structurePNGPath, imgStream.ToArray());
-                }
-                catch (Exception e)
-                {
-                    DebugConsole.ThrowError($"Saving the image for the stamp failed.", e);
-                }
-
-                // Unload files previously in XML
-                StructurePrefab.RemoveByFile(structureXMLPath);
-
-                // Add structure to sub XML
-                XElement structure = new XElement("structure",
-                    new XAttribute("name", nameBox.Text),
-                    new XAttribute("identifier", nameBox.Text),
-                    new XAttribute("body", "false"),
-                    new XAttribute("castshadow", "false"),
-                    new XAttribute("noaitarget", "true"),
-                    new XAttribute("category", "stamp"),
-                    new XAttribute("scale", "0.5")
-                    );
-                XElement sprite = new XElement("sprite",
-                    new XAttribute("texture", structurePNGPath), //nameBox.Text+".png"
-                    new XAttribute("depth", "0.03"),
-                    new XAttribute("sourcerect", "0,0," + dimensions.X + "," + dimensions.Y),
-                    new XAttribute("origin", "0.5,0.5")
-                    );
-
-                structure.Add(sprite);
-
-                XDocument structureDoc = XMLExtensions.TryLoadXml(structureXMLPath);
-                structureDoc.Element("Override").GetChildElement("Structure").Add(structure);
-#if DEBUG
-                structureDoc.Save(structureXMLPath);
-#else
-                structureDoc.SaveSafe(structureXMLPath);
-#endif
-                imgStream.Close();
-
-                // Load new structures in XML
-                ContentFile file = new ContentFile(structureXMLPath, ContentType.Structure);
-                StructurePrefab.LoadFromFile(file);
-                UpdateEntityList();
-            }
-
-            saveFrame = null;
-            return false;
+            return true;
         }
 
         private void CreateLoadScreen()
@@ -2828,6 +2883,8 @@ namespace Barotrauma
                     lightComponent.Light.Enabled = item.ParentInventory == null;
                 }
             }
+
+            UpdateEntityList();
         }
 
         private bool LoadSub(GUIButton button, object obj)
@@ -2886,11 +2943,13 @@ namespace Barotrauma
                         if (lightComponent != null) lightComponent.LightColor = new Color(lightComponent.LightColor, lightComponent.LightColor.A / 255.0f * 0.5f);
                     }
                     new GUIMessageBox("", TextManager.Get("AdjustedLightsNotification"));
+                    UpdateEntityList();
                     return true;
                 };
                 adjustLightsPrompt.Buttons[1].OnClicked += adjustLightsPrompt.Close;
             }
 
+            UpdateEntityList();
             return true;
         }
 
@@ -3382,6 +3441,7 @@ namespace Barotrauma
 
         private bool ChangeSubName(GUITextBox textBox, string text)
         {
+            // TODO: Rename folder, XML path in main XML and PNG paths in SUB XML
             if (string.IsNullOrWhiteSpace(text))
             {
                 textBox.Flash(GUI.Style.Red);
@@ -3452,6 +3512,20 @@ namespace Barotrauma
                 }
             }
 
+            // If selecting a stamp, duplicate if from other sub file
+            if(obj is MapEntityPrefab structure)
+            {
+                if (structure.Category == MapEntityCategory.Stamp)
+                {
+                    if (!structure.FilePath.Contains(Submarine.MainSub.Info.Name))
+                    {
+                        DuplicateStamp(structure);
+                        SoundPlayer.PlayUISound(GUISoundType.PickItemFail);
+                        return false;
+                    }                
+                }
+            }
+
             if (dummyCharacter?.SelectedConstruction != null)
             {
                 var inv = dummyCharacter?.SelectedConstruction?.OwnInventory;
@@ -3501,7 +3575,6 @@ namespace Barotrauma
                             {
                                 SoundPlayer.PlayUISound(GUISoundType.PickItem);
                             }
-
                             if (!item.Removed)
                             {
                                 StoreCommand(new AddOrDeleteCommand(new List<MapEntity> { item }, false));
@@ -3509,10 +3582,10 @@ namespace Barotrauma
                             break;
                         }
                         case ItemAssemblyPrefab _:
-                        case ItemPrefab _:
+                        case ItemPrefab itemPrefab:
                         {
                             // Place the item into our hands
-                            DraggedItemPrefab = (MapEntityPrefab) obj;
+                            DraggedItemPrefab = (MapEntityPrefab)obj;
                             SoundPlayer.PlayUISound(GUISoundType.PickItem);
                             break;
                         }
@@ -3528,6 +3601,106 @@ namespace Barotrauma
             return false;
         }
 
+        private void DuplicateStamp(MapEntityPrefab stamp)
+        {
+            // TODO: Add text to manager
+            //var msgBox = new GUIMessageBox(
+            //   " Notice" ,
+            //   " Using a stamp made in a different sub file will create a duplicate stamp for this file. Continue?",
+            //   new[] { TextManager.Get("Yes"), TextManager.Get("Cancel") });
+            var msgBox = new GUIMessageBox(
+               " Notice",
+               " To use a stamp made in another sub file, it must be duplicated. Continue?",
+               new[] { TextManager.Get("Yes"), TextManager.Get("Cancel") });
+            msgBox.Buttons[0].OnClicked += (deleteBtn, userData2) =>
+            {
+                try
+                {
+                    // Ensure all prerequisite folders/files exist
+                    string subName = Submarine.MainSub.Info.Name;
+                    UpdateFolderStructure(subName);
+
+                    // Save file
+                    string saveFolder = "Mods/Stamps";
+                    string subFolder = saveFolder + "/" + subName;
+                    string structurePNGPath = subFolder + "/" + stamp.Name + "_" + subName + ".png";
+                    string structureXMLPath = subFolder + "/" + subName + ".xml";
+
+                    if (File.Exists(structurePNGPath))
+                    {
+                        var msgBox = new GUIMessageBox(TextManager.Get("Warning"), "A stamp with this name already exists! Do you want to overwrite it?", new[] { TextManager.Get("Yes"), TextManager.Get("No") });
+                        msgBox.Buttons[0].OnClicked = (btn, userdata) =>
+                        {
+                            msgBox.Close();
+
+                            //TODO
+
+                            //Delete existing image
+
+                            Save();
+                            return true;
+                        };
+                        msgBox.Buttons[1].OnClicked = msgBox.Close;
+                    }
+                    else
+                    {
+                        Save();
+                    }
+
+                    void Save()
+                    {
+                        // Unload files previously in XML
+                        StructurePrefab.RemoveByFile(structureXMLPath);
+
+                        // Get elements from original stamp
+                        XDocument stampDoc = XMLExtensions.TryLoadXml(stamp.FilePath);
+
+                        XElement stampElement = stampDoc.Element("Override").GetChildElement("Structure").Elements().First(e => e.Attribute("identifier").Value == stamp.Identifier);
+
+                        string stampPNGPath = stampElement.GetChildElement("sprite").Attribute("texture").Value;
+
+                        // Duplicate image
+                        try
+                        {
+                            stampElement.GetChildElement("sprite").SetAttributeValue("texture", structurePNGPath);
+
+                            System.IO.File.WriteAllBytes(structurePNGPath, System.IO.File.ReadAllBytes(stampPNGPath));
+                        }
+                        catch (Exception e)
+                        {
+                            DebugConsole.ThrowError($"Saving the image for the duplicate stamp failed.", e);
+                        }
+
+                        // Update element values
+                        stampElement.SetAttributeValue("name", stamp.Name + "_" + subName);
+                        stampElement.SetAttributeValue("identifier", stamp.Name + "_" + subName);
+                        stampElement.GetChildElement("sprite").SetAttributeValue("texture", structurePNGPath);
+
+                        XDocument structureDoc = XMLExtensions.TryLoadXml(structureXMLPath);
+                        structureDoc.Element("Override").GetChildElement("Structure").Add(stampElement);
+
+#if DEBUG
+                structureDoc.Save(structureXMLPath);
+#else
+                        structureDoc.SaveSafe(structureXMLPath);
+#endif
+
+                        // Load new structures in XML
+                        ContentFile file = new ContentFile(structureXMLPath, ContentType.Structure);
+                        StructurePrefab.LoadFromFile(file);
+                        UpdateEntityList();
+                        OpenEntityMenu(MapEntityCategory.Stamp);
+                    }
+                }
+                catch (Exception e)
+                {
+                    DebugConsole.ThrowError("File duplication failed!" );
+                }
+                return true;
+            };
+            msgBox.Buttons[0].OnClicked += msgBox.Close;
+            msgBox.Buttons[1].OnClicked += msgBox.Close;
+        }
         private bool GenerateWaypoints()
         {
             if (Submarine.MainSub == null) { return false; }
