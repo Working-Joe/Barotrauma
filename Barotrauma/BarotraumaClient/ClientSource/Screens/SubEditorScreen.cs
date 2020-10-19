@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 using FarseerPhysics;
 using System.Data.Common;
 using RestSharp.Extensions;
+using FarseerPhysics.Dynamics;
 #if DEBUG
 using System.IO;
 #else
@@ -975,7 +976,10 @@ namespace Barotrauma
                     {
                         if (Submarine.MainSub != null)
                         {
-                            if (ep.FilePath.Contains(Submarine.MainSub.Info.Name))
+                            string saveFolder = "Mods/Stamps";
+                            string subFolder = saveFolder + "/" + Submarine.MainSub.Info.Name;
+                            string structureXMLPath = subFolder + "/" + Submarine.MainSub.Info.Name + ".xml";
+                            if (ep.FilePath == structureXMLPath)
                             {
                                 canDelete = true;
                             }
@@ -1002,6 +1006,7 @@ namespace Barotrauma
                                         // Remove the asset from current sub file
                                         foreach (MapEntity e in MapEntity.mapEntityList.OrderBy(e => e.ID))
                                         {
+                                            if(e.prefab == null) { continue; }
                                             if (e.prefab.Identifier == stamp.Identifier)
                                             {
                                                 e.Remove();
@@ -1028,6 +1033,7 @@ namespace Barotrauma
                                     }
                                     catch (Exception e)
                                     {
+                                        DebugConsole.ThrowError(TextManager.GetWithVariable("DeleteFileError", "[file]", stamp.FilePath), e);
                                         DebugConsole.ThrowError(TextManager.GetWithVariable("DeleteFileError", "[file]", stamp.Name), e);
                                     }
                                     return true;
@@ -1366,6 +1372,16 @@ namespace Barotrauma
                 return false;
             }
 
+            // TODO: Prevent errors upon saving stampless sub
+
+            string stampFolder = "Mods/Stamps/" + Submarine.MainSub.Info.Name;
+            if (Submarine.MainSub.Info.Name != "Unnamed" && Submarine.MainSub.Info.Name != nameBox.Text && Directory.Exists(stampFolder))
+            {
+                UpdateFolderStructure(nameBox.Text);
+                DuplicateStamps(nameBox.Text);
+                RemakeFilelist(nameBox.Text);
+            }
+
             string specialSavePath = "";
             if (Submarine.MainSub.Info.Type != SubmarineType.Player)
             {
@@ -1448,6 +1464,61 @@ namespace Barotrauma
             return result;
         }
 
+        private void DuplicateStamps(string newSubname)
+        {
+            try
+            {
+                // Load newsub XML
+                string saveFolder = "Mods/Stamps";
+                //string subFolder = saveFolder + "/" + subName;
+                //string structurePNGPath = subFolder + "/" + stamp.Name + "_" + subName + ".png";
+                //string structureXMLPath = subFolder + "/" + subName + ".xml";
+
+                string oldXMLPath = saveFolder + "/" + Submarine.MainSub.Info.Name + "/" + Submarine.MainSub.Info.Name + ".xml";
+                XDocument oldDoc = XMLExtensions.TryLoadXml(oldXMLPath);
+
+                foreach (XElement e in oldDoc.Element("Override").GetChildElement("Structure").Elements("structure"))
+                {
+                    DuplicateStamp(StructurePrefab.Find(e.Attribute("name").Value, e.Attribute("identifier").Value), newSubname, false);
+                }
+
+                // Replace the old stamps with the new prefabs
+                foreach (MapEntity e in MapEntity.mapEntityList.OrderBy(e => e.ID))
+                {
+                    if (e.prefab == null) { continue; }
+                    if (e.prefab.Category == MapEntityCategory.Stamp)
+                    {
+                        if (oldDoc.Element("Override").GetChildElement("Structure").Elements("structure").First(s => s.Attribute("identifier").Value == e.prefab.Identifier) != null)
+                        {
+                            // Find original stamp
+
+                            // TODO: Instead of using contains, just in case the sub file has the same name as the identifier...
+                            Structure stampPrefab = e as Structure;
+                            // New stamp identifier will be of the form  "name_newsubfile"
+                            string newId = e.prefab.Identifier + "_" + newSubname;
+                            StructurePrefab newPrefab = StructurePrefab.Find(s => s.Identifier.Equals(newId, StringComparison.InvariantCultureIgnoreCase)) as StructurePrefab;
+                            if (newPrefab == null) { continue; }
+                            Structure replacement = new Structure(e.Rect, newPrefab, Submarine.MainSub);
+                            replacement.SpriteColor = stampPrefab.SpriteColor;
+                            replacement.Scale = stampPrefab.Scale;
+                            replacement.TextureScale = stampPrefab.TextureScale;
+                            replacement.SpriteDepth = stampPrefab.SpriteDepth;
+                            replacement.TextureOffset = stampPrefab.TextureOffset;
+                            MapEntity.mapEntityList.Add(replacement);
+                            e.Remove();
+                        }
+                    }
+                }
+
+                UpdateEntityList();
+                RemakeFilelist(newSubname);
+            }
+            catch (Exception e)
+            {
+                DebugConsole.ThrowError("Failed to duplicate stamps to new sub file", e);
+                return;
+            }
+        }
         private bool SaveSubToFile(string name, string specialSavePath = null)
         {
             if (string.IsNullOrWhiteSpace(name))
@@ -2555,6 +2626,7 @@ namespace Barotrauma
                 ContentFile file = new ContentFile(structureXMLPath, ContentType.Structure);
                 StructurePrefab.LoadFromFile(file);
                 UpdateEntityList();
+                RemakeFilelist(subName);
                 OpenEntityMenu(MapEntityCategory.Stamp);
             }
 
@@ -2584,7 +2656,7 @@ namespace Barotrauma
             }
 
             // Create mod XML (filelist) if not already existing
-            string mainXMLPath = saveFolder + "/fileList.xml";
+            string mainXMLPath = saveFolder + "/filelist.xml";
             if (!File.Exists(mainXMLPath))
             {
                 // Create XML
@@ -2638,7 +2710,77 @@ namespace Barotrauma
 #endif
             }
 
+            // Create sub mod filelist XML if not already existing
+            string structureFileListPath = subFolder + "/filelist.xml";
+            string modFolder = "Mods/" + newSubName;
+            string structureFileListModPath = modFolder + "/filelist.xml";
+            string structureXMLModPath = modFolder + "/" + newSubName + " Mod.xml";
+
+            if (!File.Exists(structureFileListPath))
+            {
+                // Create XML
+                XElement element = new XElement("contentpackage",
+                    new XAttribute("name", "stamps " + newSubName),
+                    new XAttribute("gameversion", "0.10.0.0"),
+                    new XAttribute("corepackage", "false"),
+                    new XAttribute("path", structureFileListModPath)
+                    );
+                element.Add(new XElement("Structure", new XAttribute("file", structureXMLModPath)));
+
+                XDocument doc = new XDocument(element);
+#if DEBUG
+                doc.Save(structureFileListPath);
+#else
+                doc.SaveSafe(structureFileListPath);
+#endif
+            }
             return true;
+        }
+
+        private void RemakeFilelist(string subName)
+        {
+            string saveFolder = "Mods/Stamps";
+            string subFolder = saveFolder + "/" + subName;
+            string structureXMLPath = subFolder + "/" + subName + ".xml";
+            string structureXMLModPath = subFolder + "/" + subName + " Mod.xml";
+
+            string modFolder = "Mods/" + subName;
+            string structureFileListModPath = modFolder + "/filelist.xml";
+            try
+            {
+                // Get XML from original stamp
+                XDocument stampDoc = XMLExtensions.TryLoadXml(structureXMLPath);
+
+                XElement stampElement = stampDoc.Element("Override");
+
+                foreach(XElement stamp in stampElement.Element("Structure").Elements())
+                {
+                    String name = stamp.Attribute("name").Value;
+                    stamp.Element("sprite").SetAttributeValue("texture", modFolder + "/" + name + ".png");
+                }
+
+                //// Create XML
+                //XElement element = new XElement("contentpackage",
+                //    new XAttribute("name", "stamps " + subName),
+                //    new XAttribute("gameversion", "0.10.0.0"),
+                //    new XAttribute("corepackage", "false"),
+                //    new XAttribute("path", structureFileListModPath)
+                //    );
+
+                //element.Add(stampElement);
+
+                XDocument doc = new XDocument(stampElement);
+
+#if DEBUG
+                doc.Save(structureXMLModPath);
+#else
+                doc.SaveSafe(structureXMLModPath);
+#endif
+            }
+            catch (Exception e)
+            {
+                DebugConsole.ThrowError("Updating stamp filelist failed!", e);
+            }
         }
 
         private void CreateLoadScreen()
@@ -2943,7 +3085,6 @@ namespace Barotrauma
                         if (lightComponent != null) lightComponent.LightColor = new Color(lightComponent.LightColor, lightComponent.LightColor.A / 255.0f * 0.5f);
                     }
                     new GUIMessageBox("", TextManager.Get("AdjustedLightsNotification"));
-                    UpdateEntityList();
                     return true;
                 };
                 adjustLightsPrompt.Buttons[1].OnClicked += adjustLightsPrompt.Close;
@@ -3441,7 +3582,6 @@ namespace Barotrauma
 
         private bool ChangeSubName(GUITextBox textBox, string text)
         {
-            // TODO: Rename folder, XML path in main XML and PNG paths in SUB XML
             if (string.IsNullOrWhiteSpace(text))
             {
                 textBox.Flash(GUI.Style.Red);
@@ -3519,7 +3659,7 @@ namespace Barotrauma
                 {
                     if (!structure.FilePath.Contains(Submarine.MainSub.Info.Name))
                     {
-                        DuplicateStamp(structure);
+                        DuplicateStamp(structure, Submarine.MainSub.Info.Name, true);
                         SoundPlayer.PlayUISound(GUISoundType.PickItemFail);
                         return false;
                     }                
@@ -3600,10 +3740,16 @@ namespace Barotrauma
             
             return false;
         }
-
-        private void DuplicateStamp(MapEntityPrefab stamp)
+        private void DuplicateStamp(MapEntityPrefab stamp, string subName, bool notice)
         {
-            // TODO: Add text to manager
+            string saveFolder = "Mods/Stamps";
+            string subFolder = saveFolder + "/" + subName;
+            string structurePNGPath = subFolder + "/" + stamp.Name + "_" + subName + ".png";
+            string structureXMLPath = subFolder + "/" + subName + ".xml";
+
+            if (notice)
+            {
+                // TODO: Add text to manager
             //var msgBox = new GUIMessageBox(
             //   " Notice" ,
             //   " Using a stamp made in a different sub file will create a duplicate stamp for this file. Continue?",
@@ -3617,15 +3763,9 @@ namespace Barotrauma
                 try
                 {
                     // Ensure all prerequisite folders/files exist
-                    string subName = Submarine.MainSub.Info.Name;
                     UpdateFolderStructure(subName);
 
                     // Save file
-                    string saveFolder = "Mods/Stamps";
-                    string subFolder = saveFolder + "/" + subName;
-                    string structurePNGPath = subFolder + "/" + stamp.Name + "_" + subName + ".png";
-                    string structureXMLPath = subFolder + "/" + subName + ".xml";
-
                     if (File.Exists(structurePNGPath))
                     {
                         var msgBox = new GUIMessageBox(TextManager.Get("Warning"), "A stamp with this name already exists! Do you want to overwrite it?", new[] { TextManager.Get("Yes"), TextManager.Get("No") });
@@ -3646,51 +3786,6 @@ namespace Barotrauma
                     {
                         Save();
                     }
-
-                    void Save()
-                    {
-                        // Unload files previously in XML
-                        StructurePrefab.RemoveByFile(structureXMLPath);
-
-                        // Get elements from original stamp
-                        XDocument stampDoc = XMLExtensions.TryLoadXml(stamp.FilePath);
-
-                        XElement stampElement = stampDoc.Element("Override").GetChildElement("Structure").Elements().First(e => e.Attribute("identifier").Value == stamp.Identifier);
-
-                        string stampPNGPath = stampElement.GetChildElement("sprite").Attribute("texture").Value;
-
-                        // Duplicate image
-                        try
-                        {
-                            stampElement.GetChildElement("sprite").SetAttributeValue("texture", structurePNGPath);
-
-                            System.IO.File.WriteAllBytes(structurePNGPath, System.IO.File.ReadAllBytes(stampPNGPath));
-                        }
-                        catch (Exception e)
-                        {
-                            DebugConsole.ThrowError($"Saving the image for the duplicate stamp failed.", e);
-                        }
-
-                        // Update element values
-                        stampElement.SetAttributeValue("name", stamp.Name + "_" + subName);
-                        stampElement.SetAttributeValue("identifier", stamp.Name + "_" + subName);
-                        stampElement.GetChildElement("sprite").SetAttributeValue("texture", structurePNGPath);
-
-                        XDocument structureDoc = XMLExtensions.TryLoadXml(structureXMLPath);
-                        structureDoc.Element("Override").GetChildElement("Structure").Add(stampElement);
-
-#if DEBUG
-                structureDoc.Save(structureXMLPath);
-#else
-                        structureDoc.SaveSafe(structureXMLPath);
-#endif
-
-                        // Load new structures in XML
-                        ContentFile file = new ContentFile(structureXMLPath, ContentType.Structure);
-                        StructurePrefab.LoadFromFile(file);
-                        UpdateEntityList();
-                        OpenEntityMenu(MapEntityCategory.Stamp);
-                    }
                 }
                 catch (Exception e)
                 {
@@ -3700,7 +3795,60 @@ namespace Barotrauma
             };
             msgBox.Buttons[0].OnClicked += msgBox.Close;
             msgBox.Buttons[1].OnClicked += msgBox.Close;
+            }
+            else
+            {
+                Save();
+            }
+
+            void Save()
+            {
+                // Unload files previously in XML
+                StructurePrefab.RemoveByFile(structureXMLPath);
+
+                // Get elements from original stamp
+                XDocument stampDoc = XMLExtensions.TryLoadXml(stamp.FilePath);
+
+                XElement stampElement = stampDoc.Element("Override").GetChildElement("Structure").Elements().First(e => e.Attribute("identifier").Value == stamp.Identifier);
+
+                string stampPNGPath = stampElement.GetChildElement("sprite").Attribute("texture").Value;
+
+                // Duplicate image
+                try
+                {
+                    stampElement.GetChildElement("sprite").SetAttributeValue("texture", structurePNGPath);
+
+                    System.IO.File.WriteAllBytes(structurePNGPath, System.IO.File.ReadAllBytes(stampPNGPath));
+                }
+                catch (Exception e)
+                {
+                    DebugConsole.ThrowError($"Saving the image for the duplicate stamp failed.", e);
+                }
+
+                // Update element values
+                stampElement.SetAttributeValue("name", stamp.Name + "_" + subName);
+                stampElement.SetAttributeValue("identifier", stamp.Name + "_" + subName);
+                stampElement.GetChildElement("sprite").SetAttributeValue("texture", structurePNGPath);
+
+                XDocument structureDoc = XMLExtensions.TryLoadXml(structureXMLPath);
+                structureDoc.Element("Override").GetChildElement("Structure").Add(stampElement);
+
+#if DEBUG
+                structureDoc.Save(structureXMLPath);
+#else
+                structureDoc.SaveSafe(structureXMLPath);
+#endif
+
+                // Load new structures in XML
+                ContentFile file = new ContentFile(structureXMLPath, ContentType.Structure);
+                StructurePrefab.LoadFromFile(file);
+                UpdateEntityList();
+                RemakeFilelist(subName);
+                OpenEntityMenu(MapEntityCategory.Stamp);
+            }
+
         }
+
         private bool GenerateWaypoints()
         {
             if (Submarine.MainSub == null) { return false; }
@@ -4927,6 +5075,8 @@ namespace Barotrauma
             }
 
             var prevScissorRect = GameMain.Instance.GraphicsDevice.ScissorRectangle;
+
+            // TODO: Fix compression
 
             //Upscale rect to  width and height divisible by 4
             stampDimensions.Width += (4 - stampDimensions.Width & 3) % 4;

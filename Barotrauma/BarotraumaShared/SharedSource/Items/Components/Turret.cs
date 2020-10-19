@@ -280,37 +280,9 @@ namespace Barotrauma.Items.Components
             }
         }
 
-        private float FindDistance(Vector2 rayStart, Vector2 rayEnd, Category collisionCategory)
-        {
-            float closestFraction = 1.0f;
-
-            GameMain.World.RayCast((fixture, point, normal, fraction) =>
-            {
-                if(fixture.UserData is Hull hull ){ return 1; }
-                if(fraction < closestFraction)
-                {
-                    closestFraction = fraction;
-                }
-                return 1;
-            }, rayStart, rayEnd, collisionCategory);
-
-            float distance = ConvertUnits.ToDisplayUnits(closestFraction*(rayEnd - rayStart).Length());
-            return distance;
-        }
-
         public override void Update(float deltaTime, Camera cam)
         {
             this.cam = cam;
-
-            Vector2 rayStart = ConvertUnits.ToSimUnits(new Vector2(item.WorldRect.X + transformedBarrelPos.X, item.WorldRect.Y - transformedBarrelPos.Y));
-            Vector2 rayEnd = rayStart + ConvertUnits.ToSimUnits(lightComponent.Range) * new Vector2(MathF.Cos(rotation), -MathF.Sin(rotation));
-
-            var collisionCategories = Physics.CollisionWall | Physics.CollisionCharacter | Physics.CollisionLevel | Physics.CollisionItem;
-
-            float distance = FindDistance(rayStart, rayEnd, collisionCategories);
-
-            item.SendSignal(0, distance.ToString("G", CultureInfo.InvariantCulture), "distance_out", null);
-
 
             if (reload > 0.0f) { reload -= deltaTime; }
             if (!MathUtils.NearlyEqual(item.Rotation, prevBaseRotation))
