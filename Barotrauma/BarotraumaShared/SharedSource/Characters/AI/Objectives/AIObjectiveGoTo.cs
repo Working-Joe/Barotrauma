@@ -324,13 +324,15 @@ namespace Barotrauma
                     Func<PathNode, bool> nodeFilter = null;
                     if (isInside && !AllowGoingOutside)
                     {
-                        nodeFilter = node => node.Waypoint.CurrentHull != null;
+                        nodeFilter = n => n.Waypoint.CurrentHull != null;
                     }
-                    PathSteering.SteeringSeek(character.GetRelativeSimPosition(Target), 1, n =>
-                    {
-                        if (n.Waypoint.isObstructed) { return false; }
-                        return (n.Waypoint.CurrentHull == null) == (character.CurrentHull == null);
-                    }, endNodeFilter, nodeFilter, CheckVisibility);
+
+                    PathSteering.SteeringSeek(character.GetRelativeSimPosition(Target), 1, 
+                        startNodeFilter: n => (n.Waypoint.CurrentHull == null) == (character.CurrentHull == null), 
+                        endNodeFilter, 
+                        nodeFilter, 
+                        CheckVisibility);
+
                     if (!isInside && PathSteering.CurrentPath == null || PathSteering.IsPathDirty || PathSteering.CurrentPath.Unreachable)
                     {
                         if (useScooter)

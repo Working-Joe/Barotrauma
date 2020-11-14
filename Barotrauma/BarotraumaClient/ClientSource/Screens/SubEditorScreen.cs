@@ -337,6 +337,19 @@ namespace Barotrauma
                 }
             };
 
+            var undoBufferButton = new GUIButton(new RectTransform(new Vector2(0.9f, 0.9f), paddedTopPanel.RectTransform, scaleBasis: ScaleBasis.BothHeight), "", style: "UndoHistoryButton")
+            {
+                ToolTip = TextManager.Get("Editor.UndoHistoryButton"),
+                OnClicked = (btn, userData) =>
+                {
+                    showEntitiesPanel.Visible = false;
+                    previouslyUsedPanel.Visible = false;
+                    undoBufferPanel.Visible = !undoBufferPanel.Visible;
+                    undoBufferPanel.RectTransform.AbsoluteOffset = new Point(Math.Max(Math.Max(btn.Rect.X, entityCountPanel.Rect.Right), saveAssemblyFrame.Rect.Right), TopPanel.Rect.Height);
+                    return true;
+                }
+            };
+
             new GUIFrame(new RectTransform(new Vector2(0.01f, 0.9f), paddedTopPanel.RectTransform), style: "VerticalLine");
 
             subNameLabel = new GUITextBlock(new RectTransform(new Vector2(0.3f, 0.9f), paddedTopPanel.RectTransform, Anchor.CenterLeft),
@@ -450,6 +463,45 @@ namespace Barotrauma
                 ScrollBarVisible = true,
                 OnSelected = SelectPrefab
             };
+
+            //-----------------------------------------------
+
+            undoBufferPanel = new GUIFrame(new RectTransform(new Vector2(0.15f, 0.2f), GUI.Canvas) { MinSize = new Point(200, 200) })
+            {
+                Visible = false
+            };
+            undoBufferList = new GUIListBox(new RectTransform(new Vector2(0.925f, 0.9f), undoBufferPanel.RectTransform, Anchor.Center))
+            {
+                ScrollBarVisible = true,
+                OnSelected = (_, userData) =>
+                {
+                    int index;
+                    if (userData is Command command)
+                    {
+                        index = Commands.IndexOf(command);
+                    }
+                    else
+                    {
+                        index = -1;
+                    }
+
+                    int diff = index- commandIndex;
+                    int amount = Math.Abs(diff);
+
+                    if (diff >= 0)
+                    {
+                        Redo(amount + 1);
+                    }
+                    else
+                    {
+                        Undo(amount - 1);
+                    }
+                    
+                    return true;
+                }
+            };
+            
+            UpdateUndoHistoryPanel();
 
             //-----------------------------------------------
 
@@ -3715,6 +3767,7 @@ namespace Barotrauma
                             {
                                 SoundPlayer.PlayUISound(GUISoundType.PickItem);
                             }
+
                             if (!item.Removed)
                             {
                                 StoreCommand(new AddOrDeleteCommand(new List<MapEntity> { item }, false));
@@ -3725,7 +3778,7 @@ namespace Barotrauma
                         case ItemPrefab itemPrefab:
                         {
                             // Place the item into our hands
-                            DraggedItemPrefab = (MapEntityPrefab)obj;
+                            DraggedItemPrefab = (MapEntityPrefab) obj;
                             SoundPlayer.PlayUISound(GUISoundType.PickItem);
                             break;
                         }

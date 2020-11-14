@@ -99,7 +99,6 @@
   <Character file="Content/Characters/Leucocyte/Leucocyte.xml" />
   <Character file="Content/Characters/Terminalcell/Terminalcell.xml" />
   <Character file="Content/Characters/Watcher/Watcher.xml" />
-  <Character file="Content/Characters/Smallcrawler/Smallcrawler.xml" />
   <Wreck file="Content/Map/Wrecks/Dugong_Wrecked.sub" />
   <Wreck file="Content/Map/Wrecks/Kastrull_Wrecked.sub" />
   <Wreck file="Content/Map/Wrecks/Berilia_Wrecked.sub" />

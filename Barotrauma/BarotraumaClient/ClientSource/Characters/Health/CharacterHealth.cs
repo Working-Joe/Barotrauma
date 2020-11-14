@@ -225,7 +225,15 @@ namespace Barotrauma
                 Character.Controlled.ResetInteract = true;
                 if (openHealthWindow != null)
                 {
-                    openHealthWindow.characterName.Text = value.Character.Name;
+                    if (value.Character.Info == null || Character.Controlled.HasEquippedItem("healthscanner"))
+                    {
+                        openHealthWindow.characterName.Text = value.Character.Name;
+                    }
+                    else
+                    {
+                        openHealthWindow.characterName.Text = value.Character.Info.DisplayName;
+                    }
+
                     if (Character.Controlled.SelectedConstruction != null && Character.Controlled.SelectedConstruction.GetComponent<Ladder>() == null)
                     {
                         Character.Controlled.SelectedConstruction = null;

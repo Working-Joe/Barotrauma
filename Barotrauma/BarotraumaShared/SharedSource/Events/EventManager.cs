@@ -583,7 +583,7 @@ namespace Barotrauma
             enemyDanger = 0.0f;
             foreach (Character character in Character.CharacterList)
             {
-                if (character.IsDead || character.IsIncapacitated || !character.Enabled) continue;
+                if (character.IsDead || character.IsIncapacitated || !character.Enabled || character.IsPet || character.Params.CompareGroup("human")) { continue; }
 
                 EnemyAIController enemyAI = character.AIController as EnemyAIController;
                 if (enemyAI == null) continue;

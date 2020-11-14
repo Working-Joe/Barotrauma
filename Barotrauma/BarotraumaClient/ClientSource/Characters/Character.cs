@@ -580,14 +580,23 @@ namespace Barotrauma
                     soundTimer -= deltaTime;
                 }
                 else if (AIController != null)
-                {                    
+                {
                     switch (AIController.State)
                     {
                         case AIState.Attack:
                             PlaySound(CharacterSound.SoundType.Attack);
                             break;
                         default:
-                            PlaySound(CharacterSound.SoundType.Idle);
+                            var petBehavior = (AIController as EnemyAIController)?.PetBehavior;
+                            if (petBehavior != null && petBehavior.Happiness < petBehavior.MaxHappiness * 0.25f)
+                            {
+                                PlaySound(CharacterSound.SoundType.Unhappy);
+                            }
+                            else
+                            {
+                                PlaySound(CharacterSound.SoundType.Idle);
+
+                            }
                             break;
                     }
                 }
@@ -877,11 +886,12 @@ namespace Barotrauma
 
         private readonly List<CharacterSound> matchingSounds = new List<CharacterSound>();
         private SoundChannel soundChannel;
-        public void PlaySound(CharacterSound.SoundType soundType)
+        public void PlaySound(CharacterSound.SoundType soundType, float soundIntervalFactor = 1.0f)
         {
             if (sounds == null || sounds.Count == 0) { return; }
             if (soundChannel != null && soundChannel.IsPlaying) { return; }
             if (GameMain.SoundManager?.Disabled ?? true) { return; }
+            if (soundTimer > soundInterval * soundIntervalFactor) { return; }
             matchingSounds.Clear();
             foreach (var s in sounds)
             {

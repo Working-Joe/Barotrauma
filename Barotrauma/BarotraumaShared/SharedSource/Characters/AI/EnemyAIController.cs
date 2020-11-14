@@ -1664,14 +1664,15 @@ namespace Barotrauma
                                 item.body.LinearVelocity *= 0.9f;
                                 item.body.LinearVelocity -= limbDiff * 0.25f;
 
+                                bool wasBroken = item.Condition <= 0.0f;
+
                                 item.AddDamage(Character, item.WorldPosition, new Attack(0.0f, 0.0f, 0.0f, 0.0f, 0.1f), deltaTime);
 
                                 if (item.Condition <= 0.0f)
                                 {
+                                    if (!wasBroken) { PetBehavior?.OnEat(item.GetTags(), 1.0f); }
                                     Entity.Spawner.AddToRemoveQueue(item);
                                 }
-
-                                PetBehavior?.OnEat(item.GetTags(), 0.1f / item.MaxCondition);
                             }
                         }
                     }

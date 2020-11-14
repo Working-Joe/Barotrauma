@@ -84,6 +84,10 @@ namespace Barotrauma
                     {
                         newMem.interact = FocusedCharacter.ID;
                     }
+                    else if (newMem.states.HasFlag(InputNetFlags.Use) && (FocusedCharacter?.IsPet ?? false))
+                    {
+                        newMem.interact = FocusedCharacter.ID;
+                    }
                     else if (focusedItem != null && !CharacterInventory.DraggingItemToWorld &&
                         !newMem.states.HasFlag(InputNetFlags.Grab) && !newMem.states.HasFlag(InputNetFlags.Health))
                     {
@@ -254,6 +258,7 @@ namespace Barotrauma
                     if (readStatus)
                     {
                         ReadStatus(msg);
+                        (AIController as EnemyAIController)?.PetBehavior?.ClientRead(msg);
                     }
 
                     msg.ReadPadBits();

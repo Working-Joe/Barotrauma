@@ -2786,9 +2786,7 @@ namespace Barotrauma.CharacterEditor
             };
             // Spacing
             new GUIFrame(new RectTransform(buttonSize / 2, layoutGroup.RectTransform), style: null) { CanBeFocused = false };
-            Vector2 messageBoxRelSize = new Vector2(0.5f, 0.5f);
-            int messageBoxWidth = GameMain.GraphicsWidth / 2;
-            int messageBoxHeight = GameMain.GraphicsHeight / 2;
+            Vector2 messageBoxRelSize = new Vector2(0.5f, 0.7f);
             var saveRagdollButton = new GUIButton(new RectTransform(buttonSize, layoutGroup.RectTransform), GetCharacterEditorTranslation("SaveRagdoll"));
             saveRagdollButton.OnClicked += (button, userData) =>
             {
@@ -2908,12 +2906,12 @@ namespace Barotrauma.CharacterEditor
             {
                 var box = new GUIMessageBox(GetCharacterEditorTranslation("SaveAnimation"), string.Empty, new string[] { TextManager.Get("Cancel"), TextManager.Get("Save") }, messageBoxRelSize);
                 var textArea = new GUIFrame(new RectTransform(new Vector2(1, 0.1f), box.Content.RectTransform) { MinSize = new Point(350, 30) }, style: null);
-                var inputLabel = new GUITextBlock(new RectTransform(new Vector2(0.3f, 1), textArea.RectTransform) { MinSize = new Point(250, 30) }, $"{GetCharacterEditorTranslation("ProvideFileName")}: ");
-                var inputField = new GUITextBox(new RectTransform(new Vector2(0.5f, 1), textArea.RectTransform, Anchor.TopRight) { MinSize = new Point(100, 30) }, CurrentAnimation.Name);
+                var inputLabel = new GUITextBlock(new RectTransform(new Vector2(0.3f, 1), textArea.RectTransform, Anchor.CenterLeft) { MinSize = new Point(250, 30) }, $"{GetCharacterEditorTranslation("ProvideFileName")}: ");
+                var inputField = new GUITextBox(new RectTransform(new Vector2(0.45f, 1), textArea.RectTransform, Anchor.CenterRight) { MinSize = new Point(100, 30) }, CurrentAnimation.Name);
                 // Type filtering
                 var typeSelectionArea = new GUIFrame(new RectTransform(new Vector2(1f, 0.1f), box.Content.RectTransform) { MinSize = new Point(0, 30) }, style: null);
-                var typeLabel = new GUITextBlock(new RectTransform(new Vector2(0.4f, 1), typeSelectionArea.RectTransform, Anchor.TopCenter, Pivot.TopRight), $"{GetCharacterEditorTranslation("SelectAnimationType")}: ");
-                var typeDropdown = new GUIDropDown(new RectTransform(new Vector2(0.4f, 1), typeSelectionArea.RectTransform, Anchor.TopCenter, Pivot.TopLeft), elementCount: 4);
+                var typeLabel = new GUITextBlock(new RectTransform(new Vector2(0.45f, 1), typeSelectionArea.RectTransform, Anchor.CenterLeft), $"{GetCharacterEditorTranslation("SelectAnimationType")}: ");
+                var typeDropdown = new GUIDropDown(new RectTransform(new Vector2(0.45f, 1), typeSelectionArea.RectTransform, Anchor.CenterRight), elementCount: 4);
                 foreach (object enumValue in Enum.GetValues(typeof(AnimationType)))
                 {
                     if (!(enumValue is AnimationType.NotDefined))
@@ -2964,8 +2962,8 @@ namespace Barotrauma.CharacterEditor
                 deleteButton.Enabled = false;
                 // Type filtering
                 var typeSelectionArea = new GUIFrame(new RectTransform(new Vector2(0.9f, 0.1f), loadBox.Content.RectTransform) { MinSize = new Point(0, 30) }, style: null);
-                var typeLabel = new GUITextBlock(new RectTransform(new Vector2(0.4f, 1), typeSelectionArea.RectTransform, Anchor.TopCenter, Pivot.TopRight), $"{GetCharacterEditorTranslation("SelectAnimationType")}: ");
-                var typeDropdown = new GUIDropDown(new RectTransform(new Vector2(0.4f, 1), typeSelectionArea.RectTransform, Anchor.TopCenter, Pivot.TopLeft), elementCount: 4);
+                var typeLabel = new GUITextBlock(new RectTransform(new Vector2(0.45f, 1), typeSelectionArea.RectTransform, Anchor.CenterLeft), $"{GetCharacterEditorTranslation("SelectAnimationType")}: ");
+                var typeDropdown = new GUIDropDown(new RectTransform(new Vector2(0.45f, 1), typeSelectionArea.RectTransform, Anchor.CenterRight), elementCount: 4);
                 foreach (object enumValue in Enum.GetValues(typeof(AnimationType)))
                 {
                     if (!(enumValue is AnimationType.NotDefined))

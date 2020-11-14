@@ -426,7 +426,7 @@ namespace Barotrauma
             Vector2 startPos = character.DrawPosition + (character.FocusedCharacter.DrawPosition - character.DrawPosition) * 0.7f;
             startPos = cam.WorldToScreen(startPos);
 
-            string focusName = character.FocusedCharacter.DisplayName;
+            string focusName = character.FocusedCharacter.Info == null ? character.FocusedCharacter.DisplayName : character.FocusedCharacter.Info.DisplayName;
             Vector2 textPos = startPos;
             Vector2 textSize = GUI.Font.MeasureString(focusName);
             Vector2 largeTextSize = GUI.SubHeadingFont.MeasureString(focusName);

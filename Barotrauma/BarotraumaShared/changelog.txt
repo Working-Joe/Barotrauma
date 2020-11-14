@@ -1,11 +1,50 @@
 ---------------------------------------------------------------------------------------------------------
-v0.10.6.0 (Unstable)
+v0.10.6.2
+---------------------------------------------------------------------------------------------------------
+
+- Adjusted pets' item production rates and hunger/happiness thresholds.
+- Fixed inability to pick up chitin chunks.
+- Fixed event manager considering pets to be enemies, leading to monster spawns being delayed or disabled altogether when there are pets inside the sub.
+- Fixed bots having difficulties in entering/exiting the airlocks.
+- Fixed doors not obstructing waypoints after docking.
+- Fixes to pet syncing.
+- Fixes to pets disappearing when transitioning between levels.
+- Removed small crawler egg (was only intended for testing).
+- Kastrull: Fixed the airlock waypoints not being linked to the doors, causing the bots not being able to operate them.
+
+---------------------------------------------------------------------------------------------------------
+v0.10.6.1
+---------------------------------------------------------------------------------------------------------
+
+- Added sounds for pets.
+- Most fruits can be fed to pets.
+- Increased the time it takes for pets to get hungry.
+- Decreased pets' item production rate.
+- The number of monsters now increases the event intensity more than previously, which should spawn monsters less frequently.
+- Added some unarmored mudraptors to low-difficulty levels.
+- Fixed crashing when a character takes damage from something else than another character attacking them (e.g. volcanoes).
+- Fixed some steering issues where bots would return to the last waypoint instead of continuing with their current path when they should.
+- Fixed occasional "velocity invalid" error messages when a character gets hit by a very fast projectile (e.g. coilgun bolt).
+- Fixed severed tiger thresher heads doing the "death wiggle" animation.
+- Fixed water flow sounds not disappearing over time.
+- Fixed throwing an item that has no status effects (such as a flare) causing a crash.
+- Fixed chitin helmet spawning in armory cabinets.
+- Fixed event intensity going down immediately when the situation gets less intense instead of gradually returning to normal. Should make it happen less that more monsters are spawned soon after the player survives the previous wave of monsters.
+- Fixed monsters using the Escape state when they should use the Flee state.
+- Fixed Threshers not dying after being beheaded.
+- Fixed heads or other extruding limbs being severed also when their root body takes damage.
+- Fixed bots trying to get inside outposts (from outside) that they can't and shouldn't be able to enter to.
+- Fixed very small creatures getting stuck on waypoints.
+- Test changing the assignment logic for maintenance/operate orders: if the player doesn't specify the target character, use the bot who already is following the same order. The intention is to make it easier to change the target item of the order. The draw back is that ordering multiple bots to man the turrets now requires an extra step: specify the target character.
+
+---------------------------------------------------------------------------------------------------------
+v0.10.6.0
 ---------------------------------------------------------------------------------------------------------
 
 Changes and additions:
 - Reworked Watcher.
 - Added pets (can be obtained by buying eggs from outposts). The pets produce items that can be used for crafting if they're kept happy and well-fed.
-- Added a new monster behavior: observe.
+- Added a new AI behaviors: Observe, Follow and Freeze.
 - Added toolbelt (a wearable container with a capacity of 12 and it's own dedicated slot) as a replacement for the toolbox.
 - Improvements to the effects caused by psychosis: the affliction icon is not visible to the psychotic character, the fake fires and floods are a bit more convincing, the affliction plays random sounds and can cause other characters to become invisible.
 - Added capture group support to RegEx component.
@@ -33,7 +72,6 @@ Changes and additions:
 - Added sounds for the nausea affliction.
 - Nausea now inflicts a minor stun and internal damage when the character throws up.
 - Monsters now stop fleeing after a while, if they are not being chased and can't perceive the target anymore.
-- A minor change to the status effect condition targeting logic: If "This" and "NearbyCharacters" are both defined as the targets of a status effect, the conditions only apply to "this" entity, even though the effects are applied on all the targets.
 - Implement spread, speed, and rotation for the spawn item status effects.
 - Minor damage (less than 1 hp) doesn't spawn particles anymore.
 - Rebalanced upgrade parameters, allowing for more noticable benefits.
@@ -43,10 +81,20 @@ Changes and additions:
 - Made large monsters immune to paralyzant (mudraptor is the largest affected monster).
 - Use player name instead of server name for the server owner when hosting a server.
 - Don't draw turret range indicators in the sub editor when the turret isn't selected.
+- Adjusted Hammerhead's posture.
+- Minor adjustments to Mudraptor's animations.
+
+Modding:
+- Added Scale and Offset to Light Sprite's parameters.
+- Fixed the Constant Torque parameter not working right.
+- Allow to enable/disable tail angles per limb. Previously the angle was only applied to the first limb of type Tail.
+- Added per limb multipliers for sine animations (fish tail movement).
+- Exposed the fleeing and avoiding times on the monster AI parameters.
+- The Light Sources on characters can now be defined with conditionals.
+- Added HealthMultiplier parameter that can be used in StatusEffects like SpeedMultiplier.
 
 Character Editor:
 - Fixed a number of issues with the joint limit widgets. Also allowed to set a joint to rotate clockwise, which inverses the widget direction. Useful for heads or other limbs that extrude right from the main body.
-- Inversed the default joint ends, because it's more usual case to edit the second limb of the joint than the first.
 - The colliders of the hidden limbs are now hidden in the game view.
 - Changed the hotkey for toggling the parameter editor from "Tab" to "F1" and fix the inability to toggle the editor when a text field is selected.
 - Fixed load and save interfaces being broken on lower resolutions.

@@ -712,7 +712,7 @@ namespace Barotrauma
                 }
             }
 
-            XElement petsElement = new XElement("pets");
+            petsElement = new XElement("pets");
             PetBehavior.SavePets(petsElement);
             modeElement.Add(petsElement);            
 

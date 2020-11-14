@@ -782,6 +782,14 @@ namespace Barotrauma
 
         partial void SeverLimbJointProjSpecific(LimbJoint limbJoint, bool playSound);
 
+        protected List<Limb> GetConnectedLimbs(Limb limb)
+        {
+            connectedLimbs.Clear();
+            checkedJoints.Clear();
+            GetConnectedLimbs(connectedLimbs, checkedJoints, limb);
+            return connectedLimbs;
+        }
+
         private void GetConnectedLimbs(List<Limb> connectedLimbs, List<LimbJoint> checkedJoints, Limb limb)
         {
             connectedLimbs.Add(limb);

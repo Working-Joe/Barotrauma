@@ -92,6 +92,7 @@ namespace Barotrauma
         public GetNodePenaltyHandler GetNodePenalty;
 
         private readonly List<PathNode> nodes;
+        public readonly bool IndoorsSteering;
 
         public bool InsideSubmarine { get; set; }
         public bool ApplyPenaltyToOutsideNodes { get; set; }
@@ -105,7 +106,7 @@ namespace Barotrauma
                 wp.linkedTo.CollectionChanged += WaypointLinksChanged;
             }
 
-            InsideSubmarine = indoorsSteering;
+            IndoorsSteering = indoorsSteering;
         }
 
         void WaypointLinksChanged(object sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
@@ -201,11 +202,13 @@ namespace Barotrauma
                     if (nodeFilter != null && !nodeFilter(node)) { continue; }
                     if (startNodeFilter != null && !startNodeFilter(node)) { continue; }
                     //if searching for a path inside the sub, make sure the waypoint is visible
-                    if (InsideSubmarine)
+                    if (IndoorsSteering)
                     {
+                        if (node.Waypoint.isObstructed) { continue; }
+
                         // Always check the visibility for the start node
                         var body = Submarine.PickBody(
-                            start, node.TempPosition, null, 
+                            start, node.TempPosition, null,
                             Physics.CollisionWall | Physics.CollisionLevel | Physics.CollisionStairs);
                         if (body != null)
                         {
@@ -259,17 +262,20 @@ namespace Barotrauma
                 {
                     if (nodeFilter != null && !nodeFilter(node)) { continue; }
                     if (endNodeFilter != null && !endNodeFilter(node)) { continue; }
-
-                    //if searching for a path inside the sub, make sure the waypoint is visible
-                    if (InsideSubmarine && checkVisibility)
+                    if (IndoorsSteering)
                     {
-                        // Only check the visibility for the end node when allowed (fix leaks)
-                        var body = Submarine.PickBody(end, node.TempPosition, null,
-                            Physics.CollisionWall | Physics.CollisionLevel | Physics.CollisionStairs );
-                        if (body != null)
+                        if (node.Waypoint.isObstructed) { continue; }
+                        //if searching for a path inside the sub, make sure the waypoint is visible
+                        if (checkVisibility)
                         {
-                            if (body.UserData is Structure && !((Structure)body.UserData).IsPlatform) { continue; }
-                            if (body.UserData is Item && body.FixtureList[0].CollisionCategories.HasFlag(Physics.CollisionWall)) { continue; }
+                            // Only check the visibility for the end node when allowed (fix leaks)
+                            var body = Submarine.PickBody(end, node.TempPosition, null,
+                                Physics.CollisionWall | Physics.CollisionLevel | Physics.CollisionStairs);
+                            if (body != null)
+                            {
+                                if (body.UserData is Structure && !((Structure)body.UserData).IsPlatform) { continue; }
+                                if (body.UserData is Item && body.FixtureList[0].CollisionCategories.HasFlag(Physics.CollisionWall)) { continue; }
+                            }
                         }
                     }
                     endNode = node;
@@ -343,6 +349,7 @@ namespace Barotrauma
                 foreach (PathNode node in nodes)
                 {
                     if (node.state != 1) { continue; }
+                    if (IndoorsSteering && node.Waypoint.isObstructed) { continue; }
                     if (filter != null && !filter(node)) { continue; }
                     if (node.F < dist)
                     {
