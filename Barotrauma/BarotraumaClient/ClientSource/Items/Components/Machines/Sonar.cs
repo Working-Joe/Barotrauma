@@ -16,7 +16,7 @@ namespace Barotrauma.Items.Components
         {
             Default,
             Disruption,
-            Destructible
+            Destructible,
         }
 
         private PathFinder pathFinder;
@@ -118,7 +118,55 @@ namespace Barotrauma.Items.Components
             {
                 BlipType.Destructible,
                 new Color[] { Color.TransparentBlack, new Color(74, 113, 75) * 0.8f, new Color(151, 236, 172) * 0.8f, new Color(153, 217, 234) * 0.8f }
-            }
+            },
+        };
+
+        private static readonly Dictionary<BlipType, Color[]> blipColorGradientDeut = new Dictionary<BlipType, Color[]>()
+        {
+            {
+                BlipType.Default,
+                new Color[] { Color.TransparentBlack, new Color(0, 50, 160), new Color(0, 133, 166), new Color(4, 229, 0), new Color(255, 255, 255) }
+            },
+            {
+                BlipType.Disruption,
+                new Color[] { Color.TransparentBlack, new Color(252, 0, 105), new Color(255, 220, 62), new Color(255, 255, 255) }
+            },
+            {
+                BlipType.Destructible,
+                new Color[] { Color.TransparentBlack, new Color(74, 113, 75) * 0.8f, new Color(151, 236, 172) * 0.8f, new Color(153, 217, 234) * 0.8f }
+            },
+        };
+
+        private static readonly Dictionary<BlipType, Color[]> blipColorGradientProt = new Dictionary<BlipType, Color[]>()
+        {
+             {
+                BlipType.Default,
+                new Color[] { Color.TransparentBlack, new Color(0, 50, 160), new Color(0, 133, 166), new Color(2, 159, 30), new Color(255, 255, 255) }
+            },
+            {
+                BlipType.Disruption,
+                new Color[] { Color.TransparentBlack, new Color(254, 68, 19), new Color(255, 220, 62), new Color(255, 255, 255) }
+            },
+            {
+                BlipType.Destructible,
+                new Color[] { Color.TransparentBlack, new Color(74, 113, 75) * 0.8f, new Color(151, 236, 172) * 0.8f, new Color(153, 217, 234) * 0.8f }
+            },
+        };
+
+        private static readonly Dictionary<BlipType, Color[]> blipColorGradientTrit = new Dictionary<BlipType, Color[]>()
+        {
+            {
+                BlipType.Default,
+                new Color[] { Color.TransparentBlack, new Color(0, 50, 160), new Color(60, 0, 181), new Color(178, 0, 175), new Color(255, 255, 255) }
+            },
+            {
+                BlipType.Disruption,
+                new Color[] { Color.TransparentBlack, new Color(252, 8, 0), new Color(255, 220, 62), new Color(255, 255, 255) }
+            },
+            {
+                BlipType.Destructible,
+                new Color[] { Color.TransparentBlack, new Color(96, 48, 92), new Color(104, 76, 153), new Color(98, 129, 196) }
+            },
         };
 
         private float prevDockingDist;
@@ -141,6 +189,9 @@ namespace Barotrauma.Items.Components
         partial void InitProjSpecific(XElement element)
         {
             System.Diagnostics.Debug.Assert(Enum.GetValues(typeof(BlipType)).Cast<BlipType>().All(t => blipColorGradient.ContainsKey(t)));
+            System.Diagnostics.Debug.Assert(Enum.GetValues(typeof(BlipType)).Cast<BlipType>().All(t => blipColorGradientDeut.ContainsKey(t)));
+            System.Diagnostics.Debug.Assert(Enum.GetValues(typeof(BlipType)).Cast<BlipType>().All(t => blipColorGradientProt.ContainsKey(t)));
+            System.Diagnostics.Debug.Assert(Enum.GetValues(typeof(BlipType)).Cast<BlipType>().All(t => blipColorGradientTrit.ContainsKey(t)));
             sonarBlips = new List<SonarBlip>();
 
             foreach (XElement subElement in element.Elements())
@@ -327,6 +378,23 @@ namespace Barotrauma.Items.Components
                 sonarView.RectTransform.RelativeOffset = new Vector2(0.13f * GUI.RelativeHorizontalAspectRatio, 0);
                 sonarView.RectTransform.SetPosition(Anchor.BottomRight);
             }
+        }
+
+        private Color[] getBlipColourGradient(BlipType bliptype)
+        {
+            switch(GameMain.Config.SonarColourblindMode){
+                case SonarColourblindMode.None:
+                    return blipColorGradient[bliptype];
+                case SonarColourblindMode.Deuteranopia:
+                    return blipColorGradientDeut[bliptype];
+                case SonarColourblindMode.Protanopia:
+                    return blipColorGradientProt[bliptype];
+                case SonarColourblindMode.Tritanopia:
+                    return blipColorGradientTrit[bliptype];
+                default:
+                    return blipColorGradient[bliptype];
+            }
+
         }
 
         private void SetPingDirection(Vector2 direction)
@@ -1526,7 +1594,7 @@ namespace Barotrauma.Items.Components
             Vector2 dir = pos / (float)Math.Sqrt(posDistSqr);
             Vector2 normal = new Vector2(dir.Y, -dir.X);
             float scale = (strength + 3.0f) * blip.Scale * blipScale;
-            Color color = ToolBox.GradientLerp(strength, blipColorGradient[blip.BlipType]);
+            Color color = ToolBox.GradientLerp(strength, getBlipColourGradient(blip.BlipType));
 
             sonarBlip.Draw(spriteBatch, center + pos, color, sonarBlip.Origin, blip.Rotation ?? MathUtils.VectorToAngle(pos),
                 blip.Size * scale * 0.5f, SpriteEffects.None, 0);

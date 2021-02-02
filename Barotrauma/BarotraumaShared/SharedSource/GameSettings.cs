@@ -24,6 +24,13 @@ namespace Barotrauma
         Transparent,
         Opaque
     }
+    public enum SonarColourblindMode
+    {
+        None,
+        Deuteranopia,
+        Protanopia,
+        Tritanopia
+    }
 
     public partial class GameSettings
     {
@@ -76,6 +83,8 @@ namespace Barotrauma
         private WindowMode windowMode;
 
         private LosMode losMode;
+
+        private SonarColourblindMode sonarColourblindMode;
 
         public List<Pair<string, int>> jobPreferences;
 
@@ -696,6 +705,12 @@ namespace Barotrauma
             set { losMode = value; }
         }
 
+        public SonarColourblindMode SonarColourblindMode
+        {
+            get { return sonarColourblindMode; }
+            set { sonarColourblindMode = value; }
+        }
+
         private const float MinHUDScale = 0.75f, MaxHUDScale = 1.25f;
         public static float HUDScale { get; set; }
         private const float MinInventoryScale = 0.75f, MaxInventoryScale = 1.25f;
@@ -956,6 +971,7 @@ namespace Barotrauma
                 new XAttribute("lightmapscale", LightMapScale),
                 new XAttribute("chromaticaberration", ChromaticAberrationEnabled),
                 new XAttribute("losmode", LosMode),
+                new XAttribute("sonarcolourblindmode", SonarColourblindMode),
                 new XAttribute("hudscale", HUDScale),
                 new XAttribute("inventoryscale", InventoryScale));
 
@@ -1223,6 +1239,7 @@ namespace Barotrauma
                 new XAttribute("lightmapscale", LightMapScale),
                 new XAttribute("chromaticaberration", ChromaticAberrationEnabled),
                 new XAttribute("losmode", LosMode),
+                new XAttribute("sonarcolourblindmode", SonarColourblindMode),
                 new XAttribute("hudscale", HUDScale),
                 new XAttribute("inventoryscale", InventoryScale));
 
@@ -1435,6 +1452,11 @@ namespace Barotrauma
             {
                 losMode = LosMode.Transparent;
             }
+            var sonarColourBlindModeStr = graphicsSettings.GetAttributeString("sonarcolourblindmode", "None");
+            if (!Enum.TryParse(sonarColourBlindModeStr, out sonarColourblindMode))
+            {
+                sonarColourblindMode = SonarColourblindMode.None;
+            }
 #if CLIENT
             if (GraphicsWidth == 0 || GraphicsHeight == 0)
             {
@@ -1585,6 +1607,7 @@ namespace Barotrauma
             NoiseGateThreshold = -45;
             windowMode = WindowMode.BorderlessWindowed;
             losMode = LosMode.Transparent;
+            sonarColourblindMode = SonarColourblindMode.None;
             UseSteamMatchmaking = true;
             RequireSteamAuthentication = true;
             QuickStartSubmarineName = string.Empty;

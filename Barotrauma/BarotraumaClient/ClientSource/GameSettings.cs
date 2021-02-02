@@ -638,6 +638,21 @@ namespace Barotrauma
                 }
             };
 
+            // TODO: Add text localisation
+            new GUITextBlock(new RectTransform(new Vector2(1.0f, 0.05f), leftColumn.RectTransform), "Accessibility", font: GUI.SubHeadingFont, wrap: true);
+            var SonarColourblindModeDD = new GUIDropDown(new RectTransform(new Vector2(1.0f, 0.05f), leftColumn.RectTransform));
+            SonarColourblindModeDD.AddItem("None", SonarColourblindMode.None);
+            SonarColourblindModeDD.AddItem("Deuteranopia", SonarColourblindMode.Deuteranopia);
+            SonarColourblindModeDD.AddItem("Protanopia", SonarColourblindMode.Protanopia);
+            SonarColourblindModeDD.AddItem("Tritanopia", SonarColourblindMode.Tritanopia);
+            SonarColourblindModeDD.SelectItem(GameMain.Config.sonarColourblindMode);
+            SonarColourblindModeDD.OnSelected = (guiComponent, obj) =>
+            {
+                UnsavedSettings = true;
+                GameMain.Config.SonarColourblindMode = (SonarColourblindMode)guiComponent.UserData;
+                return true;
+            };
+
             GUITextBlock particleLimitText = new GUITextBlock(new RectTransform(new Vector2(1.0f, 0.05f), rightColumn.RectTransform), TextManager.Get("ParticleLimit"), font: GUI.SubHeadingFont, wrap: true);
             GUIScrollBar particleScrollBar = new GUIScrollBar(new RectTransform(new Vector2(1.0f, 0.05f), rightColumn.RectTransform), style: "GUISlider",
                 barSize: 0.1f)
