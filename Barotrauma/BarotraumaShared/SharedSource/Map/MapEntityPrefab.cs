@@ -19,7 +19,7 @@ namespace Barotrauma
         Alien = 128, 
         Wrecked = 256, 
         ItemAssembly = 512,
-        Legacy = 1024
+        Legacy = 1024,
         Stamp = 2048
     }
 
