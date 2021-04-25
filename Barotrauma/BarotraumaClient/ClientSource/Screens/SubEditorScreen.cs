@@ -5582,8 +5582,9 @@ namespace Barotrauma
             stampDimensions.Height += (4 - stampDimensions.Height & 3) % 4;
 
             // Calculate image dimensions at max zoom
-            int width = (int)(stampDimensions.Width*cam.MaxZoom);
-            int height = (int)(stampDimensions.Height*cam.MaxZoom);
+            float maxzoom = 2.0f; // Technically subeditor maxzoom is 10. It would be possible to use that zoom and scale, but that might break things...
+            int width = (int)(stampDimensions.Width*maxzoom);
+            int height = (int)(stampDimensions.Height* maxzoom);
 
             Vector2 viewPos = stampDimensions.Center.ToVector2();
             float scale = Math.Min(width / (float)stampDimensions.Width, height / (float)stampDimensions.Height);
