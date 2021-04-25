@@ -337,19 +337,6 @@ namespace Barotrauma
                 }
             };
 
-            var undoBufferButton = new GUIButton(new RectTransform(new Vector2(0.9f, 0.9f), paddedTopPanel.RectTransform, scaleBasis: ScaleBasis.BothHeight), "", style: "UndoHistoryButton")
-            {
-                ToolTip = TextManager.Get("Editor.UndoHistoryButton"),
-                OnClicked = (btn, userData) =>
-                {
-                    showEntitiesPanel.Visible = false;
-                    previouslyUsedPanel.Visible = false;
-                    undoBufferPanel.Visible = !undoBufferPanel.Visible;
-                    undoBufferPanel.RectTransform.AbsoluteOffset = new Point(Math.Max(Math.Max(btn.Rect.X, entityCountPanel.Rect.Right), saveAssemblyFrame.Rect.Right), TopPanel.Rect.Height);
-                    return true;
-                }
-            };
-
             new GUIFrame(new RectTransform(new Vector2(0.01f, 0.9f), paddedTopPanel.RectTransform), style: "VerticalLine");
 
             subNameLabel = new GUITextBlock(new RectTransform(new Vector2(0.3f, 0.9f), paddedTopPanel.RectTransform, Anchor.CenterLeft),
