@@ -43,6 +43,13 @@ namespace Barotrauma
         private Dictionary<ulong, Steamworks.Ugc.Item?> pendingWorkshopDownloads = null;
         private string autoConnectName; private string autoConnectEndpoint;
 
+        private enum TernaryOption
+        {
+            Any,
+            Enabled,
+            Disabled
+        }
+
         private class FriendInfo
         {
             public UInt64 SteamID;
@@ -131,7 +138,7 @@ namespace Barotrauma
 
         private bool masterServerResponded;
         private IRestResponse masterServerResponse;
-        
+
         private readonly float[] columnRelativeWidth = new float[] { 0.1f, 0.1f, 0.7f, 0.12f, 0.08f, 0.08f };
         private readonly string[] columnLabel = new string[] { "ServerListCompatible", "ServerListHasPassword", "ServerListName", "ServerListRoundStarted", "ServerListPlayers", "ServerListPing" };
         
@@ -146,14 +153,18 @@ namespace Barotrauma
         private GUITickBox filterFull;
         private GUITickBox filterEmpty;
         private GUITickBox filterWhitelisted;
-        private GUITickBox filterFriendlyFire;
-        private GUITickBox filterKarma;
-        private GUITickBox filterTraitor;
-        private GUITickBox filterModded;
-        private GUITickBox filterVoip;
-        private List<GUITickBox> playStyleTickBoxes;
-        private List<GUITickBox> gameModeTickBoxes;
+        private Dictionary<string, GUIDropDown> ternaryFilters;
+        private Dictionary<string, GUITickBox> filterTickBoxes;
+        private Dictionary<string, GUITickBox> playStyleTickBoxes;
+        private Dictionary<string, GUITickBox> gameModeTickBoxes;
         private GUITickBox filterOffensive;
+
+        //GUIDropDown sends the OnSelected event before SelectedData is set, so we have to cache it manually.
+        private TernaryOption filterFriendlyFireValue = TernaryOption.Any;
+        private TernaryOption filterKarmaValue = TernaryOption.Any;
+        private TernaryOption filterTraitorValue = TernaryOption.Any;
+        private TernaryOption filterVoipValue = TernaryOption.Any;
+        private TernaryOption filterModdedValue = TernaryOption.Any;
 
         private string sortedBy;
         
@@ -170,6 +181,49 @@ namespace Barotrauma
         {
             GameMain.Instance.ResolutionChanged += CreateUI;
             CreateUI();
+        }
+
+        private void AddTernaryFilter(RectTransform parent, float elementHeight, string tag, Action<TernaryOption> valueSetter)
+        {
+            var filterLayoutGroup = new GUILayoutGroup(new RectTransform(new Vector2(1.0f, elementHeight), parent), isHorizontal: true)
+            {
+                Stretch = true
+            };
+
+            var box = new GUIFrame(new RectTransform(Vector2.One, filterLayoutGroup.RectTransform, Anchor.CenterLeft, scaleBasis: ScaleBasis.BothHeight)
+            {
+                IsFixedSize = true,
+            }, null)
+            {
+                HoverColor = Color.Gray,
+                SelectedColor = Color.DarkGray,
+                CanBeFocused = false
+            };
+            if (box.RectTransform.MinSize.Y > 0)
+            {
+                box.RectTransform.MinSize = new Point(box.RectTransform.MinSize.Y);
+                box.RectTransform.Resize(box.RectTransform.MinSize);
+            }
+            Vector2 textBlockScale = new Vector2((float)(filterLayoutGroup.Rect.Width - filterLayoutGroup.Rect.Height) / (float)Math.Max(filterLayoutGroup.Rect.Width, 1.0), 1.0f);
+
+            var filterLabel = new GUITextBlock(new RectTransform(new Vector2(0.6f, 1.0f) * textBlockScale, filterLayoutGroup.RectTransform, Anchor.CenterLeft), TextManager.Get("servertag." + tag + ".label"), textAlignment: Alignment.CenterLeft)
+            {
+                UserData = TextManager.Get("servertag." + tag + ".label")
+            };
+            GUI.Style.Apply(filterLabel, "GUITextBlock", null);
+
+            var dropDown = new GUIDropDown(new RectTransform(new Vector2(0.4f, 1.0f) * textBlockScale, filterLayoutGroup.RectTransform, Anchor.CenterLeft), elementCount: 3);
+            dropDown.AddItem(TextManager.Get("any"), TernaryOption.Any);
+            dropDown.AddItem(TextManager.Get("servertag." + tag + ".true"), TernaryOption.Enabled, TextManager.Get("servertagdescription." + tag + ".true"));
+            dropDown.AddItem(TextManager.Get("servertag." + tag + ".false"), TernaryOption.Disabled, TextManager.Get("servertagdescription." + tag + ".false"));
+            dropDown.SelectItem(TernaryOption.Any);
+            dropDown.OnSelected = (_, data) => {
+                valueSetter((TernaryOption)data);
+                FilterServers();
+                return true;
+            };
+
+            ternaryFilters.Add(tag, dropDown);
         }
 
         private void CreateUI()
@@ -322,7 +376,8 @@ namespace Barotrauma
             };
             filterToggle.Children.ForEach(c => c.SpriteEffects = SpriteEffects.FlipHorizontally);
 
-            List<GUITextBlock> filterTextList = new List<GUITextBlock>();
+            ternaryFilters = new Dictionary<string, GUIDropDown>();
+            filterTickBoxes = new Dictionary<string, GUITickBox>();
 
             filterSameVersion = new GUITickBox(new RectTransform(new Vector2(1.0f, elementHeight), filters.Content.RectTransform), TextManager.Get("FilterSameVersion"))
             {
@@ -330,42 +385,42 @@ namespace Barotrauma
                 Selected = true,
                 OnSelected = (tickBox) => { FilterServers(); return true; }
             };
-            filterTextList.Add(filterSameVersion.TextBlock);
+            filterTickBoxes.Add("FilterSameVersion", filterSameVersion);
 
             filterPassword = new GUITickBox(new RectTransform(new Vector2(1.0f, elementHeight), filters.Content.RectTransform), TextManager.Get("FilterPassword"))
             {
                 UserData = TextManager.Get("FilterPassword"),
                 OnSelected = (tickBox) => { FilterServers(); return true; }
             };
-            filterTextList.Add(filterPassword.TextBlock);
+            filterTickBoxes.Add("FilterPassword", filterPassword);
 
             filterIncompatible = new GUITickBox(new RectTransform(new Vector2(1.0f, elementHeight), filters.Content.RectTransform), TextManager.Get("FilterIncompatibleServers"))
             {
                 UserData = TextManager.Get("FilterIncompatibleServers"),
                 OnSelected = (tickBox) => { FilterServers(); return true; }
             };
-            filterTextList.Add(filterIncompatible.TextBlock);
+            filterTickBoxes.Add("FilterIncompatibleServers", filterIncompatible);
 
             filterFull = new GUITickBox(new RectTransform(new Vector2(1.0f, elementHeight), filters.Content.RectTransform), TextManager.Get("FilterFullServers"))
             {
                 UserData = TextManager.Get("FilterFullServers"),
                 OnSelected = (tickBox) => { FilterServers(); return true; }
             };
-            filterTextList.Add(filterFull.TextBlock);
+            filterTickBoxes.Add("FilterFullServers", filterFull);
 
             filterEmpty = new GUITickBox(new RectTransform(new Vector2(1.0f, elementHeight), filters.Content.RectTransform), TextManager.Get("FilterEmptyServers"))
             {
                 UserData = TextManager.Get("FilterEmptyServers"),
                 OnSelected = (tickBox) => { FilterServers(); return true; }
             };
-            filterTextList.Add(filterEmpty.TextBlock);
+            filterTickBoxes.Add("FilterEmptyServers", filterEmpty);
 
             filterWhitelisted = new GUITickBox(new RectTransform(new Vector2(1.0f, elementHeight), filters.Content.RectTransform), TextManager.Get("FilterWhitelistedServers"))
             {
                 UserData = TextManager.Get("FilterWhitelistedServers"),
                 OnSelected = (tickBox) => { FilterServers(); return true; }
             };
-            filterTextList.Add(filterWhitelisted.TextBlock);
+            filterTickBoxes.Add("FilterWhitelistedServers", filterWhitelisted);
 
             filterOffensive = new GUITickBox(new RectTransform(new Vector2(1.0f, elementHeight), filters.Content.RectTransform), TextManager.Get("FilterOffensiveServers"))
             {
@@ -373,7 +428,7 @@ namespace Barotrauma
                 ToolTip = TextManager.Get("FilterOffensiveServersToolTip"),
                 OnSelected = (tickBox) => { FilterServers(); return true; }
             };
-            filterTextList.Add(filterOffensive.TextBlock);
+            filterTickBoxes.Add("FilterOffensiveServers", filterOffensive);
 
             // Filter Tags
             new GUITextBlock(new RectTransform(new Vector2(1.0f, 0.05f), filters.Content.RectTransform), TextManager.Get("servertags"), font: GUI.SubHeadingFont)
@@ -381,40 +436,11 @@ namespace Barotrauma
                 CanBeFocused = false
             };
 
-            filterKarma = new GUITickBox(new RectTransform(new Vector2(1.0f, elementHeight), filters.Content.RectTransform), TextManager.Get("servertag.karma.true"))
-            {
-                UserData = TextManager.Get("servertag.karma.true"),
-                OnSelected = (tickBox) => { FilterServers(); return true; }
-            };
-            filterTextList.Add(filterKarma.TextBlock);
-
-            filterTraitor = new GUITickBox(new RectTransform(new Vector2(1.0f, elementHeight), filters.Content.RectTransform), TextManager.Get("servertag.traitors.true"))
-            {
-                UserData = TextManager.Get("servertag.traitors.true"),
-                OnSelected = (tickBox) => { FilterServers(); return true; }
-            };
-            filterTextList.Add(filterTraitor.TextBlock);
-
-            filterFriendlyFire = new GUITickBox(new RectTransform(new Vector2(1.0f, elementHeight), filters.Content.RectTransform), TextManager.Get("servertag.friendlyfire.false"))
-            {
-                UserData = TextManager.Get("servertag.friendlyfire.false"),
-                OnSelected = (tickBox) => { FilterServers(); return true; }
-            };
-            filterTextList.Add(filterFriendlyFire.TextBlock);
-
-            filterVoip = new GUITickBox(new RectTransform(new Vector2(1.0f, elementHeight), filters.Content.RectTransform), TextManager.Get("servertag.voip.false"))
-            {
-                UserData = TextManager.Get("servertag.voip.false"),
-                OnSelected = (tickBox) => { FilterServers(); return true; }
-            };
-            filterTextList.Add(filterVoip.TextBlock);
-            
-            filterModded = new GUITickBox(new RectTransform(new Vector2(1.0f, elementHeight), filters.Content.RectTransform), TextManager.Get("servertag.modded.true"))
-            {
-                UserData = TextManager.Get("servertag.modded.true"),
-                OnSelected = (tickBox) => { FilterServers(); return true; }
-            };
-            filterTextList.Add(filterModded.TextBlock);
+            AddTernaryFilter(filters.Content.RectTransform, elementHeight, "karma", (value) => { filterKarmaValue = value; });
+            AddTernaryFilter(filters.Content.RectTransform, elementHeight, "traitors", (value) => { filterTraitorValue = value; });
+            AddTernaryFilter(filters.Content.RectTransform, elementHeight, "friendlyfire", (value) => { filterFriendlyFireValue = value; });
+            AddTernaryFilter(filters.Content.RectTransform, elementHeight, "voip", (value) => { filterVoipValue = value; });
+            AddTernaryFilter(filters.Content.RectTransform, elementHeight, "modded", (value) => { filterModdedValue = value; });
 
             // Play Style Selection
             new GUITextBlock(new RectTransform(new Vector2(1.0f, 0.05f), filters.Content.RectTransform), TextManager.Get("ServerSettingsPlayStyle"), font: GUI.SubHeadingFont)
@@ -422,7 +448,7 @@ namespace Barotrauma
                 CanBeFocused = false
             };
 
-            playStyleTickBoxes = new List<GUITickBox>();
+            playStyleTickBoxes = new Dictionary<string, GUITickBox>();
             foreach (PlayStyle playStyle in Enum.GetValues(typeof(PlayStyle)))
             {
                 var selectionTick = new GUITickBox(new RectTransform(new Vector2(1.0f, elementHeight), filters.Content.RectTransform), TextManager.Get("servertag." + playStyle))
@@ -432,14 +458,14 @@ namespace Barotrauma
                     OnSelected = (tickBox) => { FilterServers(); return true; },
                     UserData = playStyle
                 };
-                playStyleTickBoxes.Add(selectionTick);
-                filterTextList.Add(selectionTick.TextBlock);
+                playStyleTickBoxes.Add("servertag." + playStyle, selectionTick);
+                filterTickBoxes.Add("servertag." + playStyle, selectionTick);
             }
 
             // Game mode Selection
             new GUITextBlock(new RectTransform(new Vector2(1.0f, 0.05f), filters.Content.RectTransform), TextManager.Get("gamemode"), font: GUI.SubHeadingFont) { CanBeFocused = false };
 
-            gameModeTickBoxes = new List<GUITickBox>();
+            gameModeTickBoxes = new Dictionary<string, GUITickBox>();
             foreach (GameModePreset mode in GameModePreset.List)
             {
                 if (mode.IsSinglePlayer) continue;
@@ -451,21 +477,24 @@ namespace Barotrauma
                     OnSelected = (tickBox) => { FilterServers(); return true; },
                     UserData = mode.Identifier
                 };
-                gameModeTickBoxes.Add(selectionTick);
-                filterTextList.Add(selectionTick.TextBlock);
+                gameModeTickBoxes.Add(mode.Identifier, selectionTick);
+                filterTickBoxes.Add(mode.Identifier, selectionTick);
             }
 
             filters.Content.RectTransform.SizeChanged += () =>
             {
                 filters.Content.RectTransform.RecalculateChildren(true, true);
-                filterTextList.ForEach(t => t.Text = t.Parent.Parent.UserData as string);
-                gameModeTickBoxes.ForEach(tb => tb.Text = tb.ToolTip);
-                playStyleTickBoxes.ForEach(tb => tb.Text = tb.ToolTip);
-                GUITextBlock.AutoScaleAndNormalize(filterTextList, defaultScale: 1.0f);
-                if (filterTextList[0].TextScale < 0.8f)
+                filterTickBoxes.ForEach(t => t.Value.Text = t.Value.UserData as string);
+                gameModeTickBoxes.ForEach(tb => tb.Value.Text = tb.Value.ToolTip);
+                playStyleTickBoxes.ForEach(tb => tb.Value.Text = tb.Value.ToolTip);
+                GUITextBlock.AutoScaleAndNormalize(
+                    filterTickBoxes.Values.Select(tb => tb.TextBlock)
+                    .Concat(ternaryFilters.Values.Select(dd => dd.Parent.GetChild<GUITextBlock>())),
+                    defaultScale: 1.0f);
+                if (filterTickBoxes.Values.First().TextBlock.TextScale < 0.8f)
                 {
-                    filterTextList.ForEach(t => t.TextScale = 1.0f);
-                    filterTextList.ForEach(t => t.Text = ToolBox.LimitString(t.Text, t.Font, (int)(filters.Content.Rect.Width * 0.8f)));
+                    filterTickBoxes.ForEach(t => t.Value.TextBlock.TextScale = 1.0f);
+                    filterTickBoxes.ForEach(t => t.Value.TextBlock.Text = ToolBox.LimitString(t.Value.TextBlock.Text, t.Value.TextBlock.Font, (int)(filters.Content.Rect.Width * 0.8f)));
                 }
             };
 
@@ -696,6 +725,7 @@ namespace Barotrauma
         private void ReadServerMemFromFile(string file, ref List<ServerInfo> servers)
         {
             if (servers == null) { servers = new List<ServerInfo>(); }
+            servers.Clear();
 
             if (!File.Exists(file)) { return; }
 
@@ -716,11 +746,21 @@ namespace Barotrauma
                 return;
             }
 
+            bool saveCleanup = false;
             foreach (XElement element in doc.Root.Elements())
             {
                 if (element.Name != "ServerInfo") { continue; }
-                servers.Add(ServerInfo.FromXElement(element));
+                var info = ServerInfo.FromXElement(element);
+                if (!servers.Any(s => s.Equals(info)))
+                {
+                    servers.Add(info);
+                }
+                else
+                {
+                    saveCleanup = true;
+                }
             }
+            if (saveCleanup) { WriteServerMemToFile(file, servers); }
         }
 
         private void WriteServerMemToFile(string file, List<ServerInfo> servers)
@@ -739,28 +779,19 @@ namespace Barotrauma
             doc.SaveSafe(file);
         }
 
-        public ServerInfo UpdateServerInfoWithServerSettings(object endpoint, ServerSettings serverSettings)
+        public ServerInfo UpdateServerInfoWithServerSettings(NetworkConnection endpoint, ServerSettings serverSettings)
         {
             UInt64 steamId = 0;
             string ip = ""; string port = "";
-            if (endpoint is UInt64 id) { steamId = id; }
-            else if (endpoint is string strEndpoint)
+            if (endpoint is SteamP2PConnection steamP2PConnection) { steamId = steamP2PConnection.SteamID; }
+            else if (endpoint is LidgrenConnection lidgrenConnection)
             {
-                string[] address = strEndpoint.Split(':');
-                if (address.Length == 1)
-                {
-                    ip = strEndpoint;
-                    port = NetConfig.DefaultPort.ToString();
-                }
-                else
-                {
-                    ip = string.Join(":", address.Take(address.Length - 1));
-                    port = address[address.Length - 1];
-                }
+                ip = lidgrenConnection.IPString;
+                port = lidgrenConnection.Port.ToString();
             }
 
             bool isInfoNew = false;
-            ServerInfo info = serverList.Content.FindChild(d => (d.UserData is ServerInfo serverInfo) && serverInfo != null &&
+            ServerInfo info = serverList.Content.FindChild(d => (d.UserData is ServerInfo serverInfo) &&
                                                         (steamId != 0 ? steamId == serverInfo.OwnerID : (ip == serverInfo.IP && port == serverInfo.Port)))?.UserData as ServerInfo;
             if (info == null)
             {
@@ -809,7 +840,7 @@ namespace Barotrauma
             }
 
             info.Recent = true;
-            ServerInfo existingInfo = recentServers.Find(serverInfo => info.OwnerID == serverInfo.OwnerID && (info.OwnerID != 0 ? true : (info.IP == serverInfo.IP && info.Port == serverInfo.Port)));
+            ServerInfo existingInfo = recentServers.Find(info.MatchesByEndpoint);
             if (existingInfo == null)
             {
                 recentServers.Add(info);
@@ -823,10 +854,15 @@ namespace Barotrauma
             WriteServerMemToFile(recentServersFile, recentServers);
         }
 
+        public bool IsFavorite(ServerInfo info)
+        {
+            return favoriteServers.Any(info.MatchesByEndpoint);
+        }
+
         public void AddToFavoriteServers(ServerInfo info)
         {
             info.Favorite = true;
-            ServerInfo existingInfo = favoriteServers.Find(serverInfo => info.OwnerID == serverInfo.OwnerID && (info.OwnerID != 0 ? true : (info.IP == serverInfo.IP && info.Port == serverInfo.Port)));
+            ServerInfo existingInfo = favoriteServers.Find(info.MatchesByEndpoint);
             if (existingInfo == null)
             {
                 favoriteServers.Add(info);
@@ -843,7 +879,7 @@ namespace Barotrauma
         public void RemoveFromFavoriteServers(ServerInfo info)
         {
             info.Favorite = false;
-            ServerInfo existingInfo = favoriteServers.Find(serverInfo => info.OwnerID == serverInfo.OwnerID && (info.OwnerID != 0 ? true : (info.IP == serverInfo.IP && info.Port == serverInfo.Port)));
+            ServerInfo existingInfo = favoriteServers.Find(info.MatchesByEndpoint);
             if (existingInfo != null)
             {
                 favoriteServers.Remove(existingInfo);
@@ -948,6 +984,19 @@ namespace Barotrauma
         {
             base.Select();
             SelectedTab = ServerListTab.All;
+            LoadServerFilters(GameMain.Config.ServerFilterElement);
+            if (GameSettings.ShowOffensiveServerPrompt)
+            {
+                var filterOffensivePrompt = new GUIMessageBox(string.Empty, TextManager.Get("filteroffensiveserversprompt"), new string[] { TextManager.Get("yes"), TextManager.Get("no") });
+                filterOffensivePrompt.Buttons[0].OnClicked = (btn, userData) =>
+                {
+                    filterOffensive.Selected = true;
+                    filterOffensivePrompt.Close();
+                    return true;
+                };
+                filterOffensivePrompt.Buttons[1].OnClicked = filterOffensivePrompt.Close;
+                GameSettings.ShowOffensiveServerPrompt = false;
+            }
 
             Steamworks.SteamMatchmaking.ResetActions();
 
@@ -963,6 +1012,8 @@ namespace Barotrauma
         public override void Deselect()
         {
             base.Deselect();
+
+            GameMain.Config.SaveNewPlayerConfig();
 
             pendingWorkshopDownloads?.Clear();
             workshopDownloadsFrame = null;
@@ -1049,8 +1100,14 @@ namespace Barotrauma
                 else
                 {
                     bool incompatible =
-                        (!serverInfo.ContentPackageHashes.Any() && serverInfo.ContentPackagesMatch()) ||
+                        (serverInfo.ContentPackageHashes.Any() && !serverInfo.ContentPackagesMatch()) ||
                         (remoteVersion != null && !NetworkMember.IsCompatible(GameMain.Version, remoteVersion));
+
+                    var karmaFilterPassed = filterKarmaValue == TernaryOption.Any|| (filterKarmaValue == TernaryOption.Enabled) == serverInfo.KarmaEnabled;
+                    var friendlyFireFilterPassed = filterFriendlyFireValue == TernaryOption.Any || (filterFriendlyFireValue == TernaryOption.Enabled) == serverInfo.FriendlyFireEnabled;
+                    var traitorsFilterPassed = filterTraitorValue == TernaryOption.Any || (filterTraitorValue == TernaryOption.Enabled) == (serverInfo.TraitorsEnabled == YesNoMaybe.Yes || serverInfo.TraitorsEnabled == YesNoMaybe.Maybe);
+                    var voipFilterPassed = filterVoipValue == TernaryOption.Any || (filterVoipValue == TernaryOption.Enabled) == serverInfo.VoipEnabled;
+                    var moddedFilterPassed = filterModdedValue == TernaryOption.Any || (filterModdedValue == TernaryOption.Enabled) == serverInfo.GetPlayStyleTags().Any(t => t.Contains("modded.true"));
 
                     child.Visible =
                         serverInfo.OwnerVerified &&
@@ -1061,21 +1118,20 @@ namespace Barotrauma
                         (!filterFull.Selected || serverInfo.PlayerCount < serverInfo.MaxPlayers) &&
                         (!filterEmpty.Selected || serverInfo.PlayerCount > 0) &&
                         (!filterWhitelisted.Selected || serverInfo.UsingWhiteList == true) &&
-                        (filterOffensive.Selected || !ForbiddenWordFilter.IsForbidden(serverInfo.ServerName)) &&
-                        (!filterKarma.Selected || serverInfo.KarmaEnabled == true) &&
-                        (!filterFriendlyFire.Selected || serverInfo.FriendlyFireEnabled == false) &&
-                        (!filterTraitor.Selected || serverInfo.TraitorsEnabled == YesNoMaybe.Yes || serverInfo.TraitorsEnabled == YesNoMaybe.Maybe) &&
-                        (!filterVoip.Selected || serverInfo.VoipEnabled == false) &&
-                        (!filterModded.Selected || serverInfo.GetPlayStyleTags().Any(t => t.Contains("modded.true"))) &&
+                        (!filterOffensive.Selected || !ForbiddenWordFilter.IsForbidden(serverInfo.ServerName)) &&
+                        karmaFilterPassed &&
+                        friendlyFireFilterPassed &&
+                        traitorsFilterPassed &&
+                        voipFilterPassed &&
+                        moddedFilterPassed &&
                         ((selectedTab == ServerListTab.All && (serverInfo.LobbyID != 0 || !string.IsNullOrWhiteSpace(serverInfo.Port))) ||
                          (selectedTab == ServerListTab.Recent && serverInfo.Recent) ||
                          (selectedTab == ServerListTab.Favorites && serverInfo.Favorite));
                 }
 
-                foreach (GUITickBox tickBox in playStyleTickBoxes)
+                foreach (GUITickBox tickBox in playStyleTickBoxes.Values)
                 {
                     var playStyle = (PlayStyle)tickBox.UserData;
-
                     if (!tickBox.Selected && (serverInfo.PlayStyle == playStyle || !serverInfo.PlayStyle.HasValue))
                     {
                         child.Visible = false;
@@ -1083,7 +1139,7 @@ namespace Barotrauma
                     }
                 }
 
-                foreach (GUITickBox tickBox in gameModeTickBoxes)
+                foreach (GUITickBox tickBox in gameModeTickBoxes.Values)
                 {
                     var gameMode = (string)tickBox.UserData;
                     if (!tickBox.Selected && serverInfo.GameMode != null && serverInfo.GameMode.Equals(gameMode, StringComparison.OrdinalIgnoreCase))
@@ -1198,8 +1254,7 @@ namespace Barotrauma
                 };
 
                 var serverFrame = serverList.Content.FindChild(d => (d.UserData is ServerInfo info) &&
-                                                                info.OwnerID == serverInfo.OwnerID &&
-                                                                (serverInfo.OwnerID != 0 ? true : (info.IP == serverInfo.IP && info.Port == serverInfo.Port)));
+                                                                info.MatchesByEndpoint(serverInfo));
 
                 if (serverFrame != null)
                 {
@@ -1259,20 +1314,50 @@ namespace Barotrauma
 
             if (info.InServer)
             {
+                int framePadding = 5;
+
                 friendPopup = new GUIFrame(new RectTransform(Vector2.One, GUI.Canvas));
-                var serverNameText = new GUITextBlock(new RectTransform(new Vector2(0.7f, 1.0f), friendPopup.RectTransform), info.ConnectName ?? "[Unnamed]");
-                var joinButton = new GUIButton(new RectTransform(new Vector2(0.3f, 1.0f), friendPopup.RectTransform, Anchor.TopRight), TextManager.Get("ServerListJoin"))
+
+                var serverNameText = new GUITextBlock(new RectTransform(new Vector2(0.7f, 1.0f), friendPopup.RectTransform, Anchor.CenterLeft), info.ConnectName ?? "[Unnamed]");
+                serverNameText.RectTransform.AbsoluteOffset = new Point(framePadding, 0);
+
+                var joinButton = new GUIButton(new RectTransform(new Vector2(0.3f, 1.0f), friendPopup.RectTransform, Anchor.CenterRight), TextManager.Get("ServerListJoin"))
                 {
                     UserData = info
                 };
                 joinButton.OnClicked = JoinFriend;
+                joinButton.RectTransform.AbsoluteOffset = new Point(framePadding, 0);
 
-                Vector2 frameDims = joinButton.Font.MeasureString(info.ConnectName ?? "[Unnamed]");
-                frameDims.X /= 0.6f;
-                frameDims.Y *= 1.5f;
-                friendPopup.RectTransform.NonScaledSize = frameDims.ToPoint();
+                Point joinButtonTextSize = joinButton.Font.MeasureString(joinButton.Text).ToPoint();
+                int joinButtonHeight = joinButton.RectTransform.NonScaledSize.Y;
+                int totalAdditionalTextPadding = (joinButtonHeight - joinButtonTextSize.Y);
+
+                // Make the final button sized so that the space between the text and the edges in the X direction is the same as the Y direction.
+                Point finalButtonSize = new Point(joinButtonTextSize.X + totalAdditionalTextPadding, joinButtonHeight);
+
+                // Add padding to the server name to match the padding on the button text.
+                serverNameText.Padding = new Vector4(totalAdditionalTextPadding / 2);
+
+                // Get the dimensions of the text we want to show, plus the extra padding we added.
+                Point serverNameSize = serverNameText.Font.MeasureString(serverNameText.Text).ToPoint() + new Point(totalAdditionalTextPadding, totalAdditionalTextPadding);
+
+                // Now determine how large the parent frame has to be to exactly fit our two controls.
+                Point frameDims = new Point(serverNameSize.X + finalButtonSize.X + framePadding*2, Math.Max(serverNameSize.Y, finalButtonSize.Y) + framePadding * 2);
+
+                var popupPos = PlayerInput.MousePosition.ToPoint();
+                if(popupPos.X+frameDims.X > GUI.Canvas.NonScaledSize.X)
+                {
+                    // Prevent the Join button from going off the end of the screen if the server name is long or we click a user towards the edge.
+                    popupPos.X = GUI.Canvas.NonScaledSize.X - frameDims.X;
+                }
+
+                // Apply the size and position changes.
+                friendPopup.RectTransform.NonScaledSize = frameDims;
                 friendPopup.RectTransform.RelativeOffset = Vector2.Zero;
-                friendPopup.RectTransform.AbsoluteOffset = PlayerInput.MousePosition.ToPoint();
+                friendPopup.RectTransform.AbsoluteOffset = popupPos;
+
+                joinButton.RectTransform.NonScaledSize = finalButtonSize;
+
                 friendPopup.RectTransform.RecalculateChildren(true);
                 friendPopup.RectTransform.SetPosition(Anchor.TopLeft);
             }
@@ -2266,12 +2351,41 @@ namespace Barotrauma
         public override void AddToGUIUpdateList()
         {
             menu.AddToGUIUpdateList();
-
             friendPopup?.AddToGUIUpdateList();
-
             friendsDropdown?.AddToGUIUpdateList();
-
             workshopDownloadsFrame?.AddToGUIUpdateList();
+        }
+
+        public void SaveServerFilters(XElement element)
+        {
+            element.RemoveAttributes();
+            foreach (KeyValuePair<string, GUITickBox> filterBox in filterTickBoxes)
+            {
+                element.Add(new XAttribute(filterBox.Key, filterBox.Value.Selected.ToString()));
+            }
+            foreach (KeyValuePair<string, GUIDropDown> ternaryFilter in ternaryFilters)
+            {
+                element.Add(new XAttribute(ternaryFilter.Key, ternaryFilter.Value.SelectedData.ToString()));
+            }
+        }
+
+        public void LoadServerFilters(XElement element)
+        {
+            if (element == null) { return; }
+
+            foreach (KeyValuePair<string, GUITickBox> filterBox in filterTickBoxes)
+            {
+                filterBox.Value.Selected = element.GetAttributeBool(filterBox.Key, filterBox.Value.Selected);
+            }
+            foreach (KeyValuePair<string, GUIDropDown> ternaryFilter in ternaryFilters)
+            {
+                string valueStr = element.GetAttributeString(ternaryFilter.Key, "");
+                TernaryOption ternaryOption = (TernaryOption)ternaryFilter.Value.SelectedData;
+                Enum.TryParse<TernaryOption>(valueStr, true, out ternaryOption);
+
+                var child = ternaryFilter.Value.ListBox.Content.GetChildByUserData(ternaryOption);
+                ternaryFilter.Value.Select(ternaryFilter.Value.ListBox.Content.GetChildIndex(child));
+            }
         }
         
     }

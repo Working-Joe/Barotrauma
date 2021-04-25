@@ -8,6 +8,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Barotrauma.Extensions;
+using Barotrauma.MapCreatures.Behavior;
 using FarseerPhysics.Dynamics;
 using FarseerPhysics.Dynamics.Contacts;
 
@@ -15,7 +16,7 @@ namespace Barotrauma
 {
     partial class Item : MapEntity, IDamageable, ISerializableEntity, IServerSerializable, IClientSerializable
     {
-        public static bool ShowItems = true;
+        public static bool ShowItems = true, ShowWires = true;
         
         private readonly List<PosInfo> positionBuffer = new List<PosInfo>();
 
@@ -29,6 +30,7 @@ namespace Barotrauma
         private bool editingHUDRefreshPending;
         private float editingHUDRefreshTimer;
 
+        private ContainedItemSprite activeContainedSprite;
 
         private readonly Dictionary<DecorativeSprite, DecorativeSprite.State> spriteAnimState = new Dictionary<DecorativeSprite, DecorativeSprite.State>();
 
@@ -62,9 +64,9 @@ namespace Barotrauma
             }
         }
 
-        public override bool DrawBelowWater => (!(Screen.Selected is SubEditorScreen editor) || !editor.WiringMode || !isWire) && (base.DrawBelowWater || ParentInventory is CharacterInventory);
+        public override bool DrawBelowWater => (!(Screen.Selected is SubEditorScreen editor) || !editor.WiringMode || !isWire || !isLogic) && (base.DrawBelowWater || ParentInventory is CharacterInventory);
 
-        public override bool DrawOverWater => base.DrawOverWater || (IsSelected || Screen.Selected is SubEditorScreen editor && editor.WiringMode) && isWire;
+        public override bool DrawOverWater => base.DrawOverWater || (IsSelected || Screen.Selected is SubEditorScreen editor && editor.WiringMode) && (isWire || isLogic);
 
         private GUITextBlock itemInUseWarning;
         private GUITextBlock ItemInUseWarning
@@ -85,7 +87,7 @@ namespace Barotrauma
         {
             get
             {
-                if (!GameMain.SubEditorScreen.ShowThalamus && prefab.Category.HasFlag(MapEntityCategory.Thalamus))
+                if (GameMain.SubEditorScreen.IsSubcategoryHidden(prefab.Subcategory))
                 {
                     return false;
                 }
@@ -93,18 +95,20 @@ namespace Barotrauma
             }
         }
 
+        public float GetDrawDepth()
+        {
+            return GetDrawDepth(SpriteDepth, Sprite);
+        }
+
         public Color GetSpriteColor()
         {
             Color color = spriteColor;
             if (Prefab.UseContainedSpriteColor && ownInventory != null)
             {
-                for (int i = 0; i < ownInventory.Items.Length; i++)
+                foreach (Item item in ContainedItems)
                 {
-                    if (ownInventory.Items[i] != null)
-                    {
-                        color = ownInventory.Items[i].ContainerColor;
-                        break;
-                    }
+                    color = item.ContainerColor;
+                    break;
                 }
             }
             return color;
@@ -115,13 +119,10 @@ namespace Barotrauma
             Color color = InventoryIconColor;
             if (Prefab.UseContainedInventoryIconColor && ownInventory != null)
             {
-                for (int i = 0; i < ownInventory.Items.Length; i++)
+                foreach (Item item in ContainedItems)
                 {
-                    if (ownInventory.Items[i] != null)
-                    {
-                        color = ownInventory.Items[i].ContainerColor;
-                        break;
-                    }
+                    color = item.ContainerColor;
+                    break;
                 }
             }
             return color;
@@ -130,6 +131,7 @@ namespace Barotrauma
         partial void SetActiveSpriteProjSpecific()
         {
             activeSprite = prefab.sprite;
+            activeContainedSprite = null;
             Holdable holdable = GetComponent<Holdable>();
             if (holdable != null && holdable.Attached)
             {
@@ -137,7 +139,9 @@ namespace Barotrauma
                 {
                     if (containedSprite.UseWhenAttached)
                     {
-                        activeSprite = containedSprite.Sprite;
+                        activeContainedSprite = containedSprite;
+                        activeSprite = containedSprite.Sprite; 
+                        UpdateSpriteStates(0.0f);
                         return;
                     }
                 }
@@ -149,7 +153,9 @@ namespace Barotrauma
                 {
                     if (containedSprite.MatchesContainer(Container))
                     {
+                        activeContainedSprite = containedSprite;
                         activeSprite = containedSprite.Sprite;
+                        UpdateSpriteStates(0.0f);
                         return;
                     }
                 }
@@ -182,6 +188,7 @@ namespace Barotrauma
                 decorativeSprite.Sprite.EnsureLazyLoaded();
                 spriteAnimState.Add(decorativeSprite, new DecorativeSprite.State());
             }
+            SetActiveSprite();
             UpdateSpriteStates(0.0f);
         }
 
@@ -235,10 +242,22 @@ namespace Barotrauma
         public override void Draw(SpriteBatch spriteBatch, bool editing, bool back = true)
         {
             if (!Visible || (!editing && HiddenInGame)) { return; }
-            if (editing && !ShowItems) { return; }
+
+            if (editing)
+            {
+                if (isWire)
+                {
+                    if (!ShowWires) { return; }
+                }
+                else if (!ShowItems) { return; }
+            }
             
             Color color = IsHighlighted && !GUI.DisableItemHighlights && Screen.Selected != GameMain.GameScreen ? GUI.Style.Orange : GetSpriteColor();
             //if (IsSelected && editing) color = Color.Lerp(color, Color.Gold, 0.5f);
+
+            bool isWiringMode = editing && SubEditorScreen.TransparentWiringMode && SubEditorScreen.IsWiringMode() && !isWire && parentInventory == null;
+            bool renderTransparent = isWiringMode && GetComponent<ConnectionPanel>() == null;
+            if (renderTransparent) { color *= 0.15f; }
             
             BrokenItemSprite fadeInBrokenSprite = null;
             float fadeInBrokenSpriteAlpha = 0.0f;
@@ -269,6 +288,7 @@ namespace Barotrauma
             }
 
             float depth = GetDrawDepth();
+            if (isWiringMode && isLogic && !PlayerInput.IsShiftDown()) { depth = 0.01f; }
             if (activeSprite != null)
             {
                 SpriteEffects oldEffects = activeSprite.effects;
@@ -295,7 +315,9 @@ namespace Barotrauma
                         foreach (var decorativeSprite in Prefab.DecorativeSprites)
                         {
                             if (!spriteAnimState[decorativeSprite].IsActive) { continue; }                            
-                            Vector2 offset = decorativeSprite.GetOffset(ref spriteAnimState[decorativeSprite].OffsetState, -rotationRad) * Scale;
+                            Vector2 offset = decorativeSprite.GetOffset(ref spriteAnimState[decorativeSprite].OffsetState, spriteAnimState[decorativeSprite].RandomOffsetMultiplier, -rotationRad) * Scale;
+                            if (flippedX && Prefab.CanSpriteFlipX) { offset.X = -offset.X; }
+                            if (flippedY && Prefab.CanSpriteFlipY) { offset.Y = -offset.Y; }
                             decorativeSprite.Sprite.DrawTiled(spriteBatch, 
                                 new Vector2(DrawPosition.X + offset.X - rect.Width / 2, -(DrawPosition.Y + offset.Y + rect.Height / 2)),
                                 size, color: color,
@@ -316,13 +338,20 @@ namespace Barotrauma
                         }
                         activeSprite.Draw(spriteBatch, new Vector2(DrawPosition.X, -DrawPosition.Y) + drawOffset, color, origin, rotationRad, Scale, activeSprite.effects, depth);
                         fadeInBrokenSprite?.Sprite.Draw(spriteBatch, new Vector2(DrawPosition.X, -DrawPosition.Y) + fadeInBrokenSprite.Offset.ToVector2() * Scale, color * fadeInBrokenSpriteAlpha, origin, rotationRad, Scale, activeSprite.effects, depth - 0.000001f);
+                        if (Infector != null && (Infector.ParentBallastFlora.HasBrokenThrough || BallastFloraBehavior.AlwaysShowBallastFloraSprite))
+                        {
+                            Prefab.InfectedSprite?.Draw(spriteBatch, new Vector2(DrawPosition.X, -DrawPosition.Y) + drawOffset, color, Prefab.InfectedSprite.Origin, rotationRad, Scale, activeSprite.effects, depth - 0.001f);
+                            Prefab.DamagedInfectedSprite?.Draw(spriteBatch, new Vector2(DrawPosition.X, -DrawPosition.Y) + drawOffset, Infector.HealthColor, Prefab.DamagedInfectedSprite.Origin, rotationRad, Scale, activeSprite.effects, depth - 0.002f);
+                        }
                         foreach (var decorativeSprite in Prefab.DecorativeSprites)
                         {
                             if (!spriteAnimState[decorativeSprite].IsActive) { continue; }
-                            float rot = decorativeSprite.GetRotation(ref spriteAnimState[decorativeSprite].RotationState);
-                            Vector2 offset = decorativeSprite.GetOffset(ref spriteAnimState[decorativeSprite].OffsetState, -rotationRad) * Scale;
+                            float rot = decorativeSprite.GetRotation(ref spriteAnimState[decorativeSprite].RotationState, spriteAnimState[decorativeSprite].RandomRotationFactor);
+                            Vector2 offset = decorativeSprite.GetOffset(ref spriteAnimState[decorativeSprite].OffsetState, spriteAnimState[decorativeSprite].RandomOffsetMultiplier, -rotationRad) * Scale;
+                            if (flippedX && Prefab.CanSpriteFlipX) { offset.X = -offset.X; }
+                            if (flippedY && Prefab.CanSpriteFlipY) { offset.Y = -offset.Y; }
                             decorativeSprite.Sprite.Draw(spriteBatch, new Vector2(DrawPosition.X + offset.X, -(DrawPosition.Y + offset.Y)), color, 
-                                rotationRad + rot, decorativeSprite.Scale * Scale, activeSprite.effects,
+                                rotationRad + rot, decorativeSprite.GetScale(spriteAnimState[decorativeSprite].RandomScaleFactor) * Scale, activeSprite.effects,
                                 depth: Math.Min(depth + (decorativeSprite.Sprite.Depth - activeSprite.Depth), 0.999f));
                         }
                     }
@@ -334,7 +363,7 @@ namespace Barotrauma
                     {
                         if (!back) { return; }
                         float depthStep = 0.000001f;
-                        if (holdable.Picker.SelectedItems[0] == this)
+                        if (holdable.Picker.Inventory?.GetItemInLimbSlot(InvSlotType.RightHand) == this)
                         {
                             Limb holdLimb = holdable.Picker.AnimController.GetLimb(LimbType.RightHand);
                             if (holdLimb?.ActiveSprite != null)
@@ -346,7 +375,7 @@ namespace Barotrauma
                                 }
                             }
                         }
-                        else if (holdable.Picker.SelectedItems[1] == this)
+                        else if (holdable.Picker.Inventory?.GetItemInLimbSlot(InvSlotType.LeftHand) == this)
                         {
                             Limb holdLimb = holdable.Picker.AnimController.GetLimb(LimbType.LeftHand);
                             if (holdLimb?.ActiveSprite != null)
@@ -365,15 +394,16 @@ namespace Barotrauma
                     foreach (var decorativeSprite in Prefab.DecorativeSprites)
                     {
                         if (!spriteAnimState[decorativeSprite].IsActive) { continue; }
-                        float rotation = decorativeSprite.GetRotation(ref spriteAnimState[decorativeSprite].RotationState);
-                        Vector2 offset = decorativeSprite.GetOffset(ref spriteAnimState[decorativeSprite].OffsetState, -rotationRad) * Scale;
-
+                        float rotation = decorativeSprite.GetRotation(ref spriteAnimState[decorativeSprite].RotationState, spriteAnimState[decorativeSprite].RandomRotationFactor);
+                        Vector2 offset = decorativeSprite.GetOffset(ref spriteAnimState[decorativeSprite].OffsetState, spriteAnimState[decorativeSprite].RandomOffsetMultiplier, -rotationRad) * Scale;
+                        if (flippedX && Prefab.CanSpriteFlipX) { offset.X = -offset.X; }
+                        if (flippedY && Prefab.CanSpriteFlipY) { offset.Y = -offset.Y; }
                         var ca = (float)Math.Cos(-body.Rotation);
                         var sa = (float)Math.Sin(-body.Rotation);
                         Vector2 transformedOffset = new Vector2(ca * offset.X + sa * offset.Y, -sa * offset.X + ca * offset.Y);
 
                         decorativeSprite.Sprite.Draw(spriteBatch, new Vector2(DrawPosition.X + transformedOffset.X, -(DrawPosition.Y + transformedOffset.Y)), color,
-                            -body.Rotation + rotation, decorativeSprite.Scale * Scale, activeSprite.effects,
+                            -body.Rotation + rotation, decorativeSprite.GetScale(spriteAnimState[decorativeSprite].RandomScaleFactor) * Scale, activeSprite.effects,
                             depth: depth + (decorativeSprite.Sprite.Depth - activeSprite.Depth));
                     }
                 }
@@ -385,11 +415,12 @@ namespace Barotrauma
                     foreach (var decorativeSprite in upgradeSprites)
                     {
                         if (!spriteAnimState[decorativeSprite].IsActive) { continue; }
-                        float rotation = decorativeSprite.GetRotation(ref spriteAnimState[decorativeSprite].RotationState);
-                        var (xOff, yOff) = decorativeSprite.GetOffset(ref spriteAnimState[decorativeSprite].OffsetState, -rotationRad) * Scale;
-
-                        decorativeSprite.Sprite.Draw(spriteBatch, new Vector2(DrawPosition.X + xOff, -(DrawPosition.Y + yOff)), color,
-                            rotation, decorativeSprite.Scale * Scale, activeSprite.effects,
+                        float rotation = decorativeSprite.GetRotation(ref spriteAnimState[decorativeSprite].RotationState, spriteAnimState[decorativeSprite].RandomRotationFactor);
+                        Vector2 offset = decorativeSprite.GetOffset(ref spriteAnimState[decorativeSprite].OffsetState, spriteAnimState[decorativeSprite].RandomOffsetMultiplier, -rotationRad) * Scale;
+                        if (flippedX && Prefab.CanSpriteFlipX) { offset.X = -offset.X; }
+                        if (flippedY && Prefab.CanSpriteFlipY) { offset.Y = -offset.Y; }
+                        decorativeSprite.Sprite.Draw(spriteBatch, new Vector2(DrawPosition.X + offset.X, -(DrawPosition.Y + offset.Y)), color,
+                            rotation, decorativeSprite.GetScale(spriteAnimState[decorativeSprite].RandomScaleFactor) * Scale, activeSprite.effects,
                             depth: depth + (decorativeSprite.Sprite.Depth - activeSprite.Depth));
                     }
                     
@@ -414,6 +445,14 @@ namespace Barotrauma
                 if (body != null)
                 {
                     body.DebugDraw(spriteBatch, Color.White);
+                }
+            }
+
+            if (editing && IsSelected && PlayerInput.KeyDown(Keys.Space))
+            {
+                if (GetComponent<ElectricalDischarger>() is { } discharger)
+                {
+                    discharger.DrawElectricity(spriteBatch);
                 }
             }
 
@@ -476,12 +515,39 @@ namespace Barotrauma
 
         public void UpdateSpriteStates(float deltaTime)
         {
-            DecorativeSprite.UpdateSpriteStates(Prefab.DecorativeSpriteGroups, spriteAnimState, ID, deltaTime, ConditionalMatches);
+            if (activeContainedSprite != null)
+            {
+                if (activeContainedSprite.DecorativeSpriteBehavior == ContainedItemSprite.DecorativeSpriteBehaviorType.HideWhenVisible)
+                {
+                    foreach (DecorativeSprite decorativeSprite in Prefab.DecorativeSprites)
+                    {
+                        var spriteState = spriteAnimState[decorativeSprite];
+                        spriteState.IsActive = false;
+                    }
+                    return;
+                }
+            }
+            else
+            {
+                foreach (var containedSprite in Prefab.ContainedSprites)
+                {
+                    if (containedSprite.Sprite != activeSprite && containedSprite.DecorativeSpriteBehavior == ContainedItemSprite.DecorativeSpriteBehaviorType.HideWhenNotVisible)
+                    {
+                        foreach (DecorativeSprite decorativeSprite in Prefab.DecorativeSprites)
+                        {
+                            var spriteState = spriteAnimState[decorativeSprite];
+                            spriteState.IsActive = false;
+                        }
+                        return;
+                    }
+                }
+            }
+
+            DecorativeSprite.UpdateSpriteStates(Prefab.DecorativeSpriteGroups, spriteAnimState, ID, deltaTime, ConditionalMatches);            
             
             foreach (var upgrade in Upgrades)
             {
-                var upgradeSprites = GetUpgradeSprites(upgrade);
-                
+                var upgradeSprites = GetUpgradeSprites(upgrade);                
                 foreach (var decorativeSprite in upgradeSprites)
                 {
                     var spriteState = spriteAnimState[decorativeSprite];
@@ -505,7 +571,19 @@ namespace Barotrauma
             }
 
             if (Screen.Selected != GameMain.SubEditorScreen) { return; }
-            
+
+            if (GetComponent<ElectricalDischarger>() is { } discharger)
+            {
+                if (PlayerInput.KeyDown(Keys.Space))
+                {
+                    discharger.FindNodes(WorldPosition, discharger.Range);
+                }
+                else
+                {
+                    discharger.IsActive = false;
+                }
+            }
+
             if (Character.Controlled == null) { activeHUDs.Clear(); }
 
             if (!Linkable) { return; }
@@ -540,6 +618,7 @@ namespace Barotrauma
             editingHUD = new GUIFrame(new RectTransform(new Vector2(0.3f, 0.25f), GUI.Canvas, Anchor.CenterRight) { MinSize = new Point(400, 0) }) { UserData = this };
             GUIListBox listBox = new GUIListBox(new RectTransform(new Vector2(0.95f, 0.8f), editingHUD.RectTransform, Anchor.Center), style: null)
             {
+                CanTakeKeyBoardFocus = false,
                 Spacing = (int)(25 * GUI.Scale)
             };
 
@@ -994,6 +1073,28 @@ namespace Barotrauma
             // Always create the texts if they have not yet been created
             if (texts.Any() && !recreateHudTexts) { return texts; }
             texts.Clear();
+
+            string nameText = Name;
+            if (Prefab.Identifier == "idcard" || Tags.Contains("despawncontainer"))
+            {
+                string[] readTags = Tags.Split(',');
+                string idName = null;
+                foreach (string tag in readTags)
+                {
+                    string[] s = tag.Split(':');
+                    if (s[0] == "name")
+                    {
+                        idName = s[1];
+                        break;
+                    }
+                }
+                if (idName != null)
+                {
+                    nameText += $" ({idName})";
+                }
+            }
+            texts.Add(new ColoredText(nameText, GUI.Style.TextColor, false, false));            
+
             foreach (ItemComponent ic in components)
             {
                 if (string.IsNullOrEmpty(ic.DisplayMsg)) { continue; }
@@ -1218,7 +1319,7 @@ namespace Barotrauma
         {
             if (GameMain.Client == null) { return; }
 
-            if (parentInventory != null || body == null || !body.Enabled || Removed)
+            if (parentInventory != null || body == null || !body.Enabled || Removed || (GetComponent<Projectile>()?.IsStuckToTarget ?? false))
             {
                 positionBuffer.Clear();
                 return;
@@ -1226,12 +1327,7 @@ namespace Barotrauma
 
             isActive = true;
 
-            Vector2 newVelocity = body.LinearVelocity;
-            Vector2 newPosition = body.SimPosition;
-            float newAngularVelocity = body.AngularVelocity;
-            float newRotation = body.Rotation;
-            body.CorrectPosition(positionBuffer, out newPosition, out newVelocity, out newRotation, out newAngularVelocity);
-
+            body.CorrectPosition(positionBuffer, out Vector2 newPosition, out Vector2 newVelocity, out float newRotation, out float newAngularVelocity);
             body.LinearVelocity = newVelocity;
             body.AngularVelocity = newAngularVelocity;
             if (Vector2.DistanceSquared(newPosition, body.SimPosition) > 0.0001f ||
@@ -1341,6 +1437,10 @@ namespace Barotrauma
 
             DebugConsole.Log($"Received entity spawn message for item \"{itemName}\" (identifier: {itemIdentifier}, id: {itemId})");
 
+            var itemPrefab = string.IsNullOrEmpty(itemIdentifier) ?
+                MapEntityPrefab.Find(itemName, null, showErrorMessages: false) as ItemPrefab :
+                MapEntityPrefab.Find(itemName, itemIdentifier, showErrorMessages: false) as ItemPrefab;
+
             Vector2 pos = Vector2.Zero;
             Submarine sub = null;
             int itemContainerIndex = -1;
@@ -1364,21 +1464,30 @@ namespace Barotrauma
 
             byte bodyType           = msg.ReadByte();
             bool spawnedInOutpost   = msg.ReadBoolean();
+            bool allowStealing      = msg.ReadBoolean();
             byte teamID             = msg.ReadByte();
             bool tagsChanged        = msg.ReadBoolean();
             string tags = "";
             if (tagsChanged)
             {
-                tags = msg.ReadString();
+                string[] addedTags = msg.ReadString().Split(',');
+                string[] removedTags = msg.ReadString().Split(',');
+                if (itemPrefab != null)
+                {
+                    tags = string.Join(',',itemPrefab.Tags.Where(t => !removedTags.Contains(t)).Concat(addedTags));
+                }
+            }
+            bool isNameTag = msg.ReadBoolean();
+            string writtenName = "";
+            if (isNameTag)
+            {
+                writtenName = msg.ReadString();
             }
 
-            if (!spawn) return null;
+            if (!spawn) { return null; }
 
             //----------------------------------------
 
-            var itemPrefab = string.IsNullOrEmpty(itemIdentifier) ?
-                MapEntityPrefab.Find(itemName, null, showErrorMessages: false) as ItemPrefab :
-                MapEntityPrefab.Find(itemName, itemIdentifier, showErrorMessages: false) as ItemPrefab;
             if (itemPrefab == null)
             {
                 string errorMsg = "Failed to spawn item, prefab not found (name: " + (itemName ?? "null") + ", identifier: " + (itemIdentifier ?? "null") + ")";
@@ -1425,10 +1534,10 @@ namespace Barotrauma
                 }
             }
 
-            var item = new Item(itemPrefab, pos, sub)
+            var item = new Item(itemPrefab, pos, sub, id: itemId)
             {
-                ID = itemId,
-                SpawnedInOutpost = spawnedInOutpost
+                SpawnedInOutpost = spawnedInOutpost,
+                AllowStealing = allowStealing
             };
 
             if (item.body != null)
@@ -1438,10 +1547,15 @@ namespace Barotrauma
 
             foreach (WifiComponent wifiComponent in item.GetComponents<WifiComponent>())
             {
-                wifiComponent.TeamID = (Character.TeamType)teamID;
+                wifiComponent.TeamID = (CharacterTeamType)teamID;
             }
             if (descriptionChanged) { item.Description = itemDesc; }
             if (tagsChanged) { item.Tags = tags; }
+            var nameTag = item.GetComponent<NameTag>();
+            if (nameTag != null)
+            {
+                nameTag.WrittenName = writtenName;
+            }
 
             if (sub != null)
             {
@@ -1464,10 +1578,10 @@ namespace Barotrauma
 
         partial void RemoveProjSpecific()
         {
-            if (Inventory.draggingItem == this)
+            if (Inventory.DraggingItems.Contains(this))
             {
-                Inventory.draggingItem = null;
-                Inventory.draggingSlot = null;
+                Inventory.DraggingItems.Clear();
+                Inventory.DraggingSlot = null;
             }
         }
     }

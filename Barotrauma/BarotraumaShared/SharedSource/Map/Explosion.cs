@@ -6,6 +6,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Xml.Linq;
+using Barotrauma.Extensions;
+using Barotrauma.MapCreatures.Behavior;
 
 namespace Barotrauma
 {
@@ -13,7 +15,7 @@ namespace Barotrauma
     {
         private static readonly List<Triplet<Explosion, Vector2, float>> prevExplosions = new List<Triplet<Explosion, Vector2, float>>();
 
-        private readonly Attack attack;
+        public readonly Attack Attack;
         
         private readonly float force;
 
@@ -23,32 +25,41 @@ namespace Barotrauma
         private readonly float screenColorRange, screenColorDuration;
 
         private bool sparks, shockwave, flames, smoke, flash, underwaterBubble;
+        private bool playTinnitus;
         private bool applyFireEffects;
+        private string[] ignoreFireEffectsForTags;
+        private bool ignoreCover;
+        private bool onlyInside;
+        private bool onlyOutside;
         private readonly float flashDuration;
         private readonly float? flashRange;
         private readonly string decal;
         private readonly float decalSize;
 
         public float EmpStrength { get; set; }
+        
+        public float BallastFloraDamage { get; set; }
 
-        public Explosion(float range, float force, float damage, float structureDamage, float itemDamage, float empStrength = 0.0f)
+        public Explosion(float range, float force, float damage, float structureDamage, float itemDamage, float empStrength = 0.0f, float ballastFloraStrength = 0.0f)
         {
-            attack = new Attack(damage, 0.0f, 0.0f, structureDamage, itemDamage, range)
+            Attack = new Attack(damage, 0.0f, 0.0f, structureDamage, itemDamage, range)
             {
                 SeverLimbsProbability = 1.0f
             };
             this.force = force;
             this.EmpStrength = empStrength;
+            BallastFloraDamage = ballastFloraStrength;
             sparks = true;
             shockwave = true;
             smoke = true;
             flames = true;
             underwaterBubble = true;
+            ignoreFireEffectsForTags = new string[0];
         }
         
         public Explosion(XElement element, string parentDebugName)
         {
-            attack = new Attack(element, parentDebugName + ", Explosion");
+            Attack = new Attack(element, parentDebugName + ", Explosion");
 
             force = element.GetAttributeFloat("force", 0.0f);
 
@@ -58,21 +69,29 @@ namespace Barotrauma
             underwaterBubble = element.GetAttributeBool("underwaterbubble", true);
             smoke       = element.GetAttributeBool("smoke", true);
 
+            playTinnitus = element.GetAttributeBool("playtinnitus", true);
+
             applyFireEffects = element.GetAttributeBool("applyfireeffects", flames);
+            ignoreFireEffectsForTags = element.GetAttributeStringArray("ignorefireeffectsfortags", new string[0], convertToLowerInvariant: true);
+
+            ignoreCover = element.GetAttributeBool("ignorecover", false);
+            onlyInside = element.GetAttributeBool("onlyinside", false);
+            onlyOutside = element.GetAttributeBool("onlyoutside", false);
 
             flash           = element.GetAttributeBool("flash", true);
             flashDuration   = element.GetAttributeFloat("flashduration", 0.05f);
             if (element.Attribute("flashrange") != null) { flashRange = element.GetAttributeFloat("flashrange", 100.0f); }
 
             EmpStrength = element.GetAttributeFloat("empstrength", 0.0f);
+            BallastFloraDamage = element.GetAttributeFloat("ballastfloradamage", 0.0f);
 
             decal       = element.GetAttributeString("decal", "");
             decalSize   = element.GetAttributeFloat(1.0f, "decalSize", "decalsize");
 
-            cameraShake = element.GetAttributeFloat("camerashake", attack.Range * 0.1f);
-            cameraShakeRange = element.GetAttributeFloat("camerashakerange", attack.Range);
+            cameraShake = element.GetAttributeFloat("camerashake", Attack.Range * 0.1f);
+            cameraShakeRange = element.GetAttributeFloat("camerashakerange", Attack.Range);
 
-            screenColorRange = element.GetAttributeFloat("screencolorrange", attack.Range * 0.1f);
+            screenColorRange = element.GetAttributeFloat("screencolorrange", Attack.Range * 0.1f);
             screenColor = element.GetAttributeColor("screencolor", Color.Transparent);
             screenColorDuration = element.GetAttributeFloat("screencolorduration", 0.1f);
         }
@@ -108,7 +127,7 @@ namespace Barotrauma
                 hull.AddDecal(decal, worldPosition, decalSize, isNetworkEvent: false);
             }
 
-            float displayRange = attack.Range;
+            float displayRange = Attack.Range;
 
             Vector2 cameraPos = Character.Controlled != null ? Character.Controlled.WorldPosition : GameMain.GameScreen.Cam.Position;
             float cameraDist = Vector2.Distance(cameraPos, worldPosition) / 2.0f;
@@ -123,9 +142,14 @@ namespace Barotrauma
 
             if (displayRange < 0.1f) { return; }
 
-            if (attack.GetStructureDamage(1.0f) > 0.0f)
+            if (Attack.GetStructureDamage(1.0f) > 0.0f || Attack.GetLevelWallDamage(1.0f) > 0.0f)
             {
-                RangedStructureDamage(worldPosition, displayRange, attack.GetStructureDamage(1.0f), attacker);
+                RangedStructureDamage(worldPosition, displayRange, Attack.GetStructureDamage(1.0f), Attack.GetLevelWallDamage(1.0f), attacker);
+            }
+
+            if (BallastFloraDamage > 0.0f)
+            {
+                RangedBallastFloraDamage(worldPosition, displayRange, BallastFloraDamage, attacker);
             }
 
             if (EmpStrength > 0.0f)
@@ -155,20 +179,24 @@ namespace Barotrauma
                 }
             }
 
-            if (MathUtils.NearlyEqual(force, 0.0f) && MathUtils.NearlyEqual(attack.Stun, 0.0f) && MathUtils.NearlyEqual(attack.GetTotalDamage(false), 0.0f))
+            if (MathUtils.NearlyEqual(force, 0.0f) && MathUtils.NearlyEqual(Attack.Stun, 0.0f) && MathUtils.NearlyEqual(Attack.GetTotalDamage(false), 0.0f))
             {
                 return;
             }
 
-            DamageCharacters(worldPosition, attack, force, damageSource, attacker);
+            DamageCharacters(worldPosition, Attack, force, damageSource, attacker);
 
             if (GameMain.NetworkMember == null || !GameMain.NetworkMember.IsClient)
             {
                 foreach (Item item in Item.ItemList)
                 {
                     if (item.Condition <= 0.0f) { continue; }
-                    if (Vector2.Distance(item.WorldPosition, worldPosition) > attack.Range * 0.5f) { continue; }
-                    if (applyFireEffects && !item.FireProof)
+                    float dist = Vector2.Distance(item.WorldPosition, worldPosition);
+                    float itemRadius = item.body == null ? 0.0f : item.body.GetMaxExtent();
+                    dist = Math.Max(0.0f, dist - ConvertUnits.ToDisplayUnits(itemRadius));
+                    if (dist > Attack.Range) { continue; }
+
+                    if (dist < Attack.Range * 0.5f && applyFireEffects && !item.FireProof && ignoreFireEffectsForTags.None(t => item.HasTag(t)))
                     {
                         //don't apply OnFire effects if the item is inside a fireproof container
                         //(or if it's inside a container that's inside a fireproof container, etc)
@@ -177,9 +205,9 @@ namespace Barotrauma
                         while (container != null)
                         {
                             if (container.FireProof)
-                            { 
-                                fireProof = true; 
-                                break; 
+                            {
+                                fireProof = true;
+                                break;
                             }
                             container = container.Container;
                         }
@@ -190,20 +218,18 @@ namespace Barotrauma
                             {
                                 GameMain.NetworkMember.CreateEntityEvent(item, new object[] { NetEntityEvent.Type.ApplyStatusEffect, ActionType.OnFire });
                             }
-                        }
+                        }                        
                     }
 
                     if (item.Prefab.DamagedByExplosions && !item.Indestructible)
                     {
-                        float limbRadius = item.body == null ? 0.0f : item.body.GetMaxExtent();
-                        float dist = Vector2.Distance(item.WorldPosition, worldPosition);
-                        dist = Math.Max(0.0f, dist - ConvertUnits.ToDisplayUnits(limbRadius));
-                        if (dist > attack.Range)
-                        {
-                            continue;
-                        }
-                        float distFactor = 1.0f - dist / attack.Range;
-                        float damageAmount = attack.GetItemDamage(1.0f) * item.Prefab.ExplosionDamageMultiplier;
+                        float distFactor = 1.0f - dist / Attack.Range;
+                        float damageAmount = Attack.GetItemDamage(1.0f) * item.Prefab.ExplosionDamageMultiplier;
+
+                        Vector2 explosionPos = worldPosition;
+                        if (item.Submarine != null) { explosionPos -= item.Submarine.Position; }
+
+                        damageAmount *= GetObstacleDamageMultiplier(ConvertUnits.ToSimUnits(explosionPos), worldPosition, item.SimPosition);
                         item.Condition -= damageAmount * distFactor;
                     }
                 }
@@ -212,7 +238,7 @@ namespace Barotrauma
 
         partial void ExplodeProjSpecific(Vector2 worldPosition, Hull hull);
         
-        public static void DamageCharacters(Vector2 worldPosition, Attack attack, float force, Entity damageSource, Character attacker)
+        private void DamageCharacters(Vector2 worldPosition, Attack attack, float force, Entity damageSource, Character attacker)
         {
             if (attack.Range <= 0.0f) { return; }
 
@@ -227,6 +253,8 @@ namespace Barotrauma
                 {
                     continue;
                 }
+                if (onlyInside && c.Submarine == null) { continue; }
+                else if (onlyOutside && c.Submarine != null) { continue; }
 
                 Vector2 explosionPos = worldPosition;
                 if (c.Submarine != null) { explosionPos -= c.Submarine.Position; }
@@ -241,7 +269,7 @@ namespace Barotrauma
                 List<Affliction> modifiedAfflictions = new List<Affliction>();
                 foreach (Limb limb in c.AnimController.Limbs)
                 {
-                    if (limb.IsSevered || limb.ignoreCollisions) { continue; }
+                    if (limb.IsSevered || limb.IgnoreCollisions || !limb.body.Enabled) { continue; }
 
                     float dist = Vector2.Distance(limb.WorldPosition, worldPosition);
                     
@@ -255,37 +283,10 @@ namespace Barotrauma
                     float distFactor = 1.0f - dist / attack.Range;
 
                     //solid obstacles between the explosion and the limb reduce the effect of the explosion
-                    var obstacles = Submarine.PickBodies(limb.SimPosition, explosionPos, collisionCategory: Physics.CollisionItem | Physics.CollisionItemBlocking | Physics.CollisionWall);
-                    foreach (var body in obstacles)
+                    if (!ignoreCover)
                     {
-                        if (body.UserData is Item item)
-                        {
-                            var door = item.GetComponent<Door>();
-                            if (door != null && !door.IsBroken) { distFactor *= 0.01f; }
-                        }
-                        else if (body.UserData is Structure structure)
-                        {
-                            int sectionIndex = structure.FindSectionIndex(worldPosition, world: true, clamp: true);  
-                            if (structure.SectionBodyDisabled(sectionIndex))
-                            {
-                                continue;
-                            }
-                            else if (structure.SectionIsLeaking(sectionIndex))
-                            {
-                                distFactor *= 0.1f;
-                            }
-                            else
-                            {
-                                distFactor *= 0.01f;
-                            }
-                        }
-                        else
-                        {
-                            distFactor *= 0.1f;
-                        }
+                        distFactor *= GetObstacleDamageMultiplier(explosionPos, worldPosition, limb.SimPosition);
                     }
-                    if (distFactor <= 0.05f) { continue; }
-
                     distFactors.Add(limb, distFactor);
 
                     modifiedAfflictions.Clear();
@@ -340,10 +341,10 @@ namespace Barotrauma
                     }
                 }
 
-                if (c == Character.Controlled && !c.IsDead)
+                if (c == Character.Controlled && !c.IsDead && playTinnitus)
                 {
                     Limb head = c.AnimController.GetLimb(LimbType.Head);
-                    if (damages.TryGetValue(head, out float headDamage) && headDamage > 0.0f && distFactors.TryGetValue(head, out float headFactor))
+                    if (head != null && damages.TryGetValue(head, out float headDamage) && headDamage > 0.0f && distFactors.TryGetValue(head, out float headFactor))
                     {
                         PlayTinnitusProjSpecific(headFactor);
                     }
@@ -372,7 +373,7 @@ namespace Barotrauma
         /// <summary>
         /// Returns a dictionary where the keys are the structures that took damage and the values are the amount of damage taken
         /// </summary>
-        public static Dictionary<Structure, float> RangedStructureDamage(Vector2 worldPosition, float worldRange, float damage, Character attacker = null)
+        public static Dictionary<Structure, float> RangedStructureDamage(Vector2 worldPosition, float worldRange, float damage, float levelWallDamage, Character attacker = null)
         {
             List<Structure> structureList = new List<Structure>();            
             float dist = 600.0f;
@@ -395,21 +396,121 @@ namespace Barotrauma
                 {
                     float distFactor = 1.0f - (Vector2.Distance(structure.SectionPosition(i, true), worldPosition) / worldRange);
                     if (distFactor <= 0.0f) continue;
-                    
+
                     structure.AddDamage(i, damage * distFactor, attacker);
 
                     if (damagedStructures.ContainsKey(structure))
-                    { 
+                    {
                         damagedStructures[structure] += damage * distFactor;
                     }
                     else
                     {
                         damagedStructures.Add(structure, damage * distFactor);
                     }
-                }                
+                }
+            }
+
+            if (Level.Loaded != null && !MathUtils.NearlyEqual(levelWallDamage, 0.0f))
+            {
+                for (int i = Level.Loaded.ExtraWalls.Count - 1; i >= 0; i--)
+                {
+                    if (!(Level.Loaded.ExtraWalls[i] is DestructibleLevelWall destructibleWall)) { continue; }
+                    foreach (var cell in destructibleWall.Cells)
+                    {
+                        if (cell.IsPointInside(worldPosition))
+                        {
+                            destructibleWall.AddDamage(levelWallDamage, worldPosition);
+                            continue;
+                        }
+                        foreach (var edge in cell.Edges)
+                        {
+                            if (!MathUtils.GetLineIntersection(worldPosition, cell.Center, edge.Point1 + cell.Translation, edge.Point2 + cell.Translation, out Vector2 intersection))
+                            {
+                                continue;
+                            }
+
+                            float wallDist = Vector2.DistanceSquared(worldPosition, intersection);
+                            if (wallDist < worldRange * worldRange)
+                            {
+                                destructibleWall.AddDamage(damage, worldPosition);
+                                break;
+                            }
+                        }
+                    }
+                }
             }
 
             return damagedStructures;
+        }
+
+        public void RangedBallastFloraDamage(Vector2 worldPosition, float worldRange, float damage, Character attacker = null)
+        {
+            List<BallastFloraBehavior> ballastFlorae = new List<BallastFloraBehavior>();
+
+            foreach (Hull hull in Hull.hullList)
+            {
+                if (hull.BallastFlora != null) { ballastFlorae.Add(hull.BallastFlora); }
+            }
+
+            foreach (BallastFloraBehavior ballastFlora in ballastFlorae)
+            {
+                float resistanceMuliplier = ballastFlora.HasBrokenThrough ? 1f : 1f - ballastFlora.ExplosionResistance; 
+                ballastFlora.Branches.ForEachMod(branch =>
+                {
+                    Vector2 branchWorldPos = ballastFlora.GetWorldPosition() + branch.Position;
+                    float branchDist = Vector2.Distance(branchWorldPos, worldPosition);
+                    if (branchDist < worldRange)
+                    {
+                        float distFactor = 1.0f - (branchDist / worldRange);
+                        if (distFactor <= 0.0f) { return; }
+
+                        Vector2 explosionPos = worldPosition;
+                        Vector2 branchPos = branchWorldPos;
+                        if (ballastFlora.Parent?.Submarine != null) 
+                        { 
+                            explosionPos -= ballastFlora.Parent.Submarine.Position;
+                            branchPos -= ballastFlora.Parent.Submarine.Position; 
+                        }
+                        distFactor *= GetObstacleDamageMultiplier(ConvertUnits.ToSimUnits(explosionPos), worldPosition, ConvertUnits.ToSimUnits(branchPos));
+                        ballastFlora.DamageBranch(branch, damage * distFactor * resistanceMuliplier, BallastFloraBehavior.AttackType.Explosives, attacker);
+                    }
+                });
+            }
+        }
+
+        private static float GetObstacleDamageMultiplier(Vector2 explosionSimPos, Vector2 explosionWorldPos, Vector2 targetSimPos)
+        {
+            float damageMultiplier = 1.0f;
+            var obstacles = Submarine.PickBodies(targetSimPos, explosionSimPos, collisionCategory: Physics.CollisionItem | Physics.CollisionItemBlocking | Physics.CollisionWall);
+            foreach (var body in obstacles)
+            {
+                if (body.UserData is Item item)
+                {
+                    var door = item.GetComponent<Door>();
+                    if (door != null && !door.IsBroken) { damageMultiplier *= 0.01f; }
+                }
+                else if (body.UserData is Structure structure)
+                {
+                    int sectionIndex = structure.FindSectionIndex(explosionWorldPos, world: true, clamp: true);
+                    if (structure.SectionBodyDisabled(sectionIndex))
+                    {
+                        continue;
+                    }
+                    else if (structure.SectionIsLeaking(sectionIndex))
+                    {
+                        damageMultiplier *= 0.1f;
+                    }
+                    else
+                    {
+                        damageMultiplier *= 0.01f;
+                    }
+                }
+                else
+                {
+                    damageMultiplier *= 0.1f;
+                }
+            }
+            return damageMultiplier;
         }
 
         static partial void PlayTinnitusProjSpecific(float volume);

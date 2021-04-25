@@ -12,17 +12,21 @@ namespace Barotrauma.Items.Components
 {
     partial class Steering : Powered, IServerSerializable, IClientSerializable
     {
+        public const float AutopilotMinDistToPathNode = 30.0f;
+
         private const float AutopilotRayCastInterval = 0.5f;
         private const float RecalculatePathInterval = 5.0f;
-
-        private const float AutopilotMinDistToPathNode = 30.0f;
 
         private const float AutoPilotSteeringLerp = 0.1f;
 
         private const float AutoPilotMaxSpeed = 0.5f;
         private const float AIPilotMaxSpeed = 1.0f;
 
-        private Vector2 currVelocity;
+        /// <summary>
+        /// How fast the steering vector adjusts when the nav terminal is operated by something else than a character (= signals)
+        /// </summary>
+        const float DefaultSteeringAdjustSpeed = 0.2f;
+
         private Vector2 targetVelocity;
 
         private Vector2 steeringInput;
@@ -52,7 +56,13 @@ namespace Barotrauma.Items.Components
         private Sonar sonar;
 
         private Submarine controlledSub;
-                
+
+        private bool showIceSpireWarning;
+
+        private List<Submarine> connectedSubs = new List<Submarine>();
+        private const float ConnectedSubUpdateInterval = 1.0f;
+        float connectedSubUpdateTimer;
+
         public bool AutoPilot
         {
             get { return autoPilot; }
@@ -67,7 +77,10 @@ namespace Barotrauma.Items.Components
                 {
                     if (pathFinder == null)
                     {
-                        pathFinder = new PathFinder(WayPoint.WayPointList, false);
+                        pathFinder = new PathFinder(WayPoint.WayPointList, false)
+                        {
+                            GetNodePenalty = GetNodePenalty
+                        };
                     }
                     MaintainPos = true;
                     if (posToMaintain == null)
@@ -87,7 +100,7 @@ namespace Barotrauma.Items.Components
             }
         }
 
-        [Editable(0.0f, 1.0f, decimals: 3),
+        [Editable(0.0f, 1.0f, decimals: 4),
         Serialize(0.5f, true, description: "How full the ballast tanks should be when the submarine is not being steered upwards/downwards."
             + " Can be used to compensate if the ballast tanks are too large/small relative to the size of the submarine.")]
         public float NeutralBallastLevel
@@ -299,6 +312,7 @@ namespace Barotrauma.Items.Components
             }
             else
             {
+                showIceSpireWarning = false;
                 if (user != null && user.Info != null && 
                     user.SelectedConstruction == item && 
                     controlledSub != null && controlledSub.Velocity.LengthSquared() > 0.01f)
@@ -323,13 +337,13 @@ namespace Barotrauma.Items.Components
                     }
                 }
             }
-            
-            item.SendSignal(0, targetVelocity.X.ToString(CultureInfo.InvariantCulture), "velocity_x_out", user);
 
-            float targetLevel = -targetVelocity.Y;
-            targetLevel += (neutralBallastLevel - 0.5f) * 100.0f;
+            float velX = targetVelocity.X;
+            if (controlledSub != null && controlledSub.FlippedX) { velX *= -1; }
+            item.SendSignal(new Signal(velX.ToString(CultureInfo.InvariantCulture), sender: user), "velocity_x_out");
 
-            item.SendSignal(0, targetLevel.ToString(CultureInfo.InvariantCulture), "velocity_y_out", user);
+            float velY = MathHelper.Lerp((neutralBallastLevel * 100 - 50) * 2, -100 * Math.Sign(targetVelocity.Y), Math.Abs(targetVelocity.Y) / 100.0f);
+            item.SendSignal(new Signal(velY.ToString(CultureInfo.InvariantCulture), sender: user), "velocity_y_out");
         }
 
         private void IncreaseSkillLevel(Character user, float deltaTime)
@@ -342,7 +356,7 @@ namespace Barotrauma.Items.Components
             user.Info.IncreaseSkillLevel(
                 "helm",
                 SkillSettings.Current.SkillIncreasePerSecondWhenSteering / userSkill * deltaTime,
-                user.WorldPosition + Vector2.UnitY * 150.0f);
+                user.Position + Vector2.UnitY * 150.0f);
         }
 
         private void UpdateAutoPilot(float deltaTime)
@@ -351,7 +365,8 @@ namespace Barotrauma.Items.Components
             if (posToMaintain != null)
             {
                 Vector2 steeringVel = GetSteeringVelocity((Vector2)posToMaintain, 10.0f);
-                TargetVelocity = Vector2.Lerp(TargetVelocity, steeringVel, AutoPilotSteeringLerp);               
+                TargetVelocity = Vector2.Lerp(TargetVelocity, steeringVel, AutoPilotSteeringLerp);
+                showIceSpireWarning = false;
                 return;
             }
 
@@ -365,8 +380,20 @@ namespace Barotrauma.Items.Components
                 autopilotRecalculatePathTimer = RecalculatePathInterval;
             }
 
-            if (steeringPath == null) { return; }
+            if (steeringPath == null)
+            {
+                showIceSpireWarning = false;
+                return;
+            }
             steeringPath.CheckProgress(ConvertUnits.ToSimUnits(controlledSub.WorldPosition), 10.0f);
+
+            connectedSubUpdateTimer -= deltaTime;
+            if (connectedSubUpdateTimer <= 0.0f)
+            {
+                connectedSubs.Clear();
+                connectedSubs = controlledSub?.GetConnectedSubs();                
+                connectedSubUpdateTimer = ConnectedSubUpdateInterval;
+            }
 
             if (autopilotRayCastTimer <= 0.0f && steeringPath.NextNode != null)
             {
@@ -417,28 +444,54 @@ namespace Barotrauma.Items.Components
                 Math.Max(1000.0f * Math.Abs(controlledSub.Velocity.Y), controlledSub.Borders.Height * 0.75f));
 
             float avoidRadius = avoidDist.Length();
+            float damagingWallAvoidRadius = MathHelper.Clamp(avoidRadius * 1.5f, 5000.0f, 10000.0f);
 
             Vector2 newAvoidStrength = Vector2.Zero;
 
             debugDrawObstacles.Clear();
 
             //steer away from nearby walls
+            showIceSpireWarning = false;
             var closeCells = Level.Loaded.GetCells(controlledSub.WorldPosition, 4);
             foreach (VoronoiCell cell in closeCells)
             {
+                if (cell.DoesDamage)
+                {
+                    foreach (GraphEdge edge in cell.Edges)
+                    {
+                        Vector2 closestPoint = MathUtils.GetClosestPointOnLineSegment(edge.Point1 + cell.Translation, edge.Point2 + cell.Translation, controlledSub.WorldPosition);
+                        Vector2 diff = closestPoint - controlledSub.WorldPosition;
+                        float dist = diff.Length() - Math.Max(controlledSub.Borders.Width, controlledSub.Borders.Height) / 2;
+                        if (dist > damagingWallAvoidRadius) { continue; }
+
+                        Vector2 normalizedDiff = Vector2.Normalize(diff);
+                        float dot = Vector2.Dot(normalizedDiff, controlledSub.Velocity);
+
+                        float avoidStrength = MathHelper.Clamp(MathHelper.Lerp(1.0f, 0.0f, dist / damagingWallAvoidRadius - dot), 0.0f, 1.0f);
+                        Vector2 avoid = -normalizedDiff * avoidStrength;
+                        newAvoidStrength += avoid;
+                        debugDrawObstacles.Add(new ObstacleDebugInfo(edge, edge.Center, 1.0f, avoid, cell.Translation));
+
+                        if (dot > 0.0f)
+                        {
+                            showIceSpireWarning = true;
+                        }
+                    }
+                    continue;
+                }
+
                 foreach (GraphEdge edge in cell.Edges)
                 {
                     if (MathUtils.GetLineIntersection(edge.Point1 + cell.Translation, edge.Point2 + cell.Translation, controlledSub.WorldPosition, cell.Center, out Vector2 intersection))
                     {
                         Vector2 diff = controlledSub.WorldPosition - intersection;
-
                         //far enough -> ignore
                         if (Math.Abs(diff.X) > avoidDist.X && Math.Abs(diff.Y) > avoidDist.Y)
                         {
                             debugDrawObstacles.Add(new ObstacleDebugInfo(edge, intersection, 0.0f, Vector2.Zero, Vector2.Zero));
                             continue;
                         }
-                        if (diff.LengthSquared() < 1.0f) diff = Vector2.UnitY;
+                        if (diff.LengthSquared() < 1.0f) { diff = Vector2.UnitY; }
 
                         Vector2 normalizedDiff = Vector2.Normalize(diff);
                         float dot = controlledSub.Velocity == Vector2.Zero ?
@@ -465,8 +518,7 @@ namespace Barotrauma.Items.Components
             //steer away from other subs
             foreach (Submarine sub in Submarine.Loaded)
             {
-                if (sub == controlledSub) { continue; }
-                if (controlledSub.DockedTo.Contains(sub)) { continue; }
+                if (sub == controlledSub || connectedSubs.Contains(sub)) { continue; }
                 Point sizeSum = controlledSub.Borders.Size + sub.Borders.Size;
                 Vector2 minDist = sizeSum.ToVector2() / 2;
                 Vector2 diff = controlledSub.WorldPosition - sub.WorldPosition;
@@ -495,6 +547,19 @@ namespace Barotrauma.Items.Components
             {
                 TargetVelocity *= 100.0f / velMagnitude;
             }
+
+#if CLIENT
+            HintManager.OnAutoPilotPathUpdated(this);
+#endif
+        }
+
+        private float? GetNodePenalty(PathNode node, PathNode nextNode)
+        {
+            if (node.Waypoint?.Tunnel == null || controlledSub == null || node.Waypoint.Tunnel.Type == Level.TunnelType.MainPath) { return 0.0f; }
+            //never navigate from the main path to another type of path
+            if (node.Waypoint.Tunnel.Type == Level.TunnelType.MainPath && nextNode.Waypoint?.Tunnel?.Type != Level.TunnelType.MainPath) { return null; }
+            //higher cost for side paths (= autopilot prefers the main path, but can still navigate side paths if it ends up on one)
+            return 1000.0f;
         }
 
         private void UpdatePath()
@@ -569,7 +634,7 @@ namespace Barotrauma.Items.Components
         {
             if (objective.Override)
             {
-                if (user != character && user != null && user.SelectedConstruction == item)
+                if (user != character && user != null && user.SelectedConstruction == item && character.IsOnPlayerTeam)
                 {
                     character.Speak(TextManager.Get("DialogSteeringTaken"), null, 0.0f, "steeringtaken", 10.0f);
                 }
@@ -604,7 +669,7 @@ namespace Barotrauma.Items.Components
                     if (Level.IsLoadedOutpost) { break; }
                     if (DockingSources.Any(d => d.Docked))
                     {
-                        item.SendSignal(0, "1", "toggle_docking", sender: null);
+                        item.SendSignal("1", "toggle_docking");
                     }
                     if (objective.Override)
                     {
@@ -619,7 +684,7 @@ namespace Barotrauma.Items.Components
                     if (Level.IsLoadedOutpost) { break; }
                     if (DockingSources.Any(d => d.Docked))
                     {
-                        item.SendSignal(0, "1", "toggle_docking", sender: null);
+                        item.SendSignal("1", "toggle_docking");
                     }
                     if (objective.Override)
                     {
@@ -632,18 +697,25 @@ namespace Barotrauma.Items.Components
                     break;
             }
             sonar?.AIOperate(deltaTime, character, objective);
+            if (!MaintainPos && showIceSpireWarning && character.IsOnPlayerTeam)
+            {
+                character.Speak(TextManager.Get("dialogicespirespottedsonar"), null, 0.0f, "icespirespottedsonar", 60.0f);
+            }
             return false;
         }
 
-        public override void ReceiveSignal(int stepsTaken, string signal, Connection connection, Item source, Character sender, float power = 0.0f, float signalStrength = 1.0f)
+        public override void ReceiveSignal(Signal signal, Connection connection)
         {
             if (connection.Name == "velocity_in")
             {
-                currVelocity = XMLExtensions.ParseVector2(signal, false);
+                steeringAdjustSpeed = DefaultSteeringAdjustSpeed;
+                steeringInput = XMLExtensions.ParseVector2(signal.value, errorMessages: false);
+                steeringInput.X = MathHelper.Clamp(steeringInput.X, -100.0f, 100.0f);
+                steeringInput.Y = MathHelper.Clamp(-steeringInput.Y, -100.0f, 100.0f);
             }
             else
             {
-                base.ReceiveSignal(stepsTaken, signal, connection, source, sender, power, signalStrength);
+                base.ReceiveSignal(signal, connection);
             }
         }
     }

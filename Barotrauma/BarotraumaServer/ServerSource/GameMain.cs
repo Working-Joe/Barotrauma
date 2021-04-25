@@ -103,6 +103,7 @@ namespace Barotrauma
             MapEntityPrefab.Init();
             MapGenerationParams.Init();
             LevelGenerationParams.LoadPresets();
+            CaveGenerationParams.LoadPresets();
             OutpostGenerationParams.LoadPresets();
             EventSet.LoadPrefabs();
             Order.Init();
@@ -117,6 +118,7 @@ namespace Barotrauma
             NPCConversation.LoadAll(GetFilesOfType(ContentType.NPCConversations));
             ItemAssemblyPrefab.LoadAll();
             LevelObjectPrefab.LoadAll();
+            BallastFloraPrefab.LoadAll(GetFilesOfType(ContentType.MapCreature));
 
             GameModePreset.Init();
             DecalManager = new DecalManager();
@@ -359,7 +361,7 @@ namespace Barotrauma
                 }
 
 #if !DEBUG
-                if (Server?.OwnerConnection == null && !Console.IsOutputRedirected)
+                if (Server?.OwnerConnection == null)
                 {
                     DebugConsole.UpdateCommandLine((int)(Timing.Accumulator * 800));
                 }

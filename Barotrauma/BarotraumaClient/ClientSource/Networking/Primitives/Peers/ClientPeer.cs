@@ -147,13 +147,36 @@ namespace Barotrauma.Networking
                     if (missingPackages.Count > 0)
                     {
                         var nonDownloadable = missingPackages.Where(p => p.WorkshopId == 0);
+                        var mismatchedButDownloaded = missingPackages.Where(p =>
+                        {
+                            var localMatching = ContentPackage.RegularPackages.Find(l => l.SteamWorkshopId != 0 && p.WorkshopId == l.SteamWorkshopId);
+                            localMatching ??= ContentPackage.CorePackages.Find(l => l.SteamWorkshopId != 0 && p.WorkshopId == l.SteamWorkshopId);
 
-                        if (nonDownloadable.Any())
+                            return localMatching != null;
+                        });
+
+                        if (mismatchedButDownloaded.Any())
+                        {
+                            string disconnectMsg;
+                            if (mismatchedButDownloaded.Count() == 1)
+                            {
+                                disconnectMsg = $"DisconnectMessage.MismatchedWorkshopMod~[incompatiblecontentpackage]={GetPackageStr(mismatchedButDownloaded.First())}";
+                            }
+                            else
+                            {
+                                List<string> packageStrs = new List<string>();
+                                mismatchedButDownloaded.ForEach(cp => packageStrs.Add(GetPackageStr(cp)));
+                                disconnectMsg = $"DisconnectMessage.MismatchedWorkshopMods~[incompatiblecontentpackages]={string.Join(", ", packageStrs)}";
+                            }
+                            Close(disconnectMsg, disableReconnect: true);
+                            OnDisconnectMessageReceived?.Invoke(DisconnectReason.MissingContentPackage + "/" + disconnectMsg);
+                        }
+                        else if (nonDownloadable.Any())
                         {
                             string disconnectMsg;
                             if (nonDownloadable.Count() == 1)
                             {
-                                disconnectMsg = $"DisconnectMessage.MissingContentPackage~[missingcontentpackage]={GetPackageStr(missingPackages[0])}";
+                                disconnectMsg = $"DisconnectMessage.MissingContentPackage~[missingcontentpackage]={GetPackageStr(nonDownloadable.First())}";
                             }
                             else
                             {
@@ -168,7 +191,19 @@ namespace Barotrauma.Networking
                         {
                             Close(disableReconnect: true);
 
-                            string missingModNames = "\n- " + string.Join("\n\n- ", missingPackages.Select(p => GetPackageStr(p))) + "\n\n";
+                            string missingModNames = "\n";
+                            int displayedModCount = 0;
+                            foreach (ServerContentPackage missingPackage in missingPackages)
+                            {
+                                missingModNames += "\n- " + GetPackageStr(missingPackage);
+                                displayedModCount++;
+                                if (GUI.Font.MeasureString(missingModNames).Y > GameMain.GraphicsHeight * 0.5f)
+                                {
+                                    missingModNames += "\n\n" + TextManager.GetWithVariable("workshopitemdownloadprompttruncated", "[number]", (missingPackages.Count - displayedModCount).ToString());
+                                    break;
+                                }
+                            }
+                            missingModNames += "\n\n";
 
                             var msgBox = new GUIMessageBox(
                                 TextManager.Get("WorkshopItemDownloadTitle"),
@@ -189,6 +224,7 @@ namespace Barotrauma.Networking
 
                     if (!contentPackageOrderReceived)
                     {
+                        GameMain.Config.BackUpModOrder();
                         GameMain.Config.SwapPackages(corePackage.CorePackage, regularPackages.Select(p => p.RegularPackage).ToList());
                         contentPackageOrderReceived = true;
                     }

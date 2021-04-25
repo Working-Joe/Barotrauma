@@ -292,7 +292,7 @@ namespace Barotrauma
                     break;
                 case ServerNetObject.ENTITY_EVENT:
 
-                    int eventType = msg.ReadRangedInteger(0, 5);
+                    int eventType = msg.ReadRangedInteger(0, 6);
                     switch (eventType)
                     {
                         case 0: //NetEntityEvent.Type.InventoryState
@@ -330,6 +330,8 @@ namespace Barotrauma
                                 GameMain.Client.HasSpawned = true;
                                 GameMain.Client.Character = this;
                                 GameMain.LightManager.LosEnabled = true;
+                                GameMain.LightManager.LosAlpha = 1f;
+                                GameMain.Client.WaitForNextRoundRespawn = null;
                             }
                             else
                             {
@@ -349,7 +351,7 @@ namespace Barotrauma
                             {
                                 string skillIdentifier = msg.ReadString();
                                 float skillLevel = msg.ReadSingle();
-                                info?.SetSkillLevel(skillIdentifier, skillLevel, WorldPosition + Vector2.UnitY * 150.0f);
+                                info?.SetSkillLevel(skillIdentifier, skillLevel, Position + Vector2.UnitY * 150.0f);
                             }
                             break;
                         case 4: //NetEntityEvent.Type.ExecuteAttack
@@ -390,6 +392,19 @@ namespace Barotrauma
                             byte campaignInteractionType = msg.ReadByte();
                             (GameMain.GameSession?.GameMode as CampaignMode)?.AssignNPCMenuInteraction(this, (CampaignMode.InteractionType)campaignInteractionType);
                             break;
+                        case 6: //NetEntityEvent.Type.ObjectiveManagerOrderState
+                            bool properData = msg.ReadBoolean();
+                            if (!properData) { break; }
+                            int orderIndex = msg.ReadRangedInteger(0, Order.PrefabList.Count);
+                            var orderPrefab = Order.PrefabList[orderIndex];
+                            string option = null;
+                            if (orderPrefab.HasOptions)
+                            {
+                                int optionIndex = msg.ReadRangedInteger(0, orderPrefab.Options.Length);
+                                option = orderPrefab.Options[optionIndex];
+                            }
+                            GameMain.GameSession.CrewManager.SetHighlightedOrderIcon(this, orderPrefab.Identifier, option);
+                            break;
                     }
                     msg.ReadPadBits();
                     break;
@@ -416,8 +431,7 @@ namespace Barotrauma
             Character character = null;
             if (noInfo)
             {
-                character = Create(speciesName, position, seed, null, false);
-                character.ID = id;
+                character = Create(speciesName, position, seed, characterInfo: null, id: id, isRemotePlayer: false);
                 bool containsStatusData = inc.ReadBoolean();
                 if (containsStatusData)
                 {
@@ -434,22 +448,23 @@ namespace Barotrauma
 
                 CharacterInfo info = CharacterInfo.ClientRead(infoSpeciesName, inc);
 
-                character = Create(speciesName, position, seed, info, ownerId > 0 && GameMain.Client.ID != ownerId, hasAi);
-                character.ID = id;
-                character.TeamID = (TeamType)teamID;
+                character = Create(speciesName, position, seed, characterInfo: info, id: id, isRemotePlayer: ownerId > 0 && GameMain.Client.ID != ownerId, hasAi: hasAi);
+                character.TeamID = (CharacterTeamType)teamID;
                 character.CampaignInteractionType = (CampaignMode.InteractionType)inc.ReadByte();
                 if (character.CampaignInteractionType != CampaignMode.InteractionType.None)
                 {
                     (GameMain.GameSession.GameMode as CampaignMode)?.AssignNPCMenuInteraction(character, character.CampaignInteractionType);
                 }
 
-                // Check if the character has a current order
-                if (inc.ReadBoolean())
+                // Check if the character has current orders
+                int orderCount = inc.ReadByte();
+                for (int i = 0; i < orderCount; i++)
                 {
                     int orderPrefabIndex = inc.ReadByte();
                     Entity targetEntity = FindEntityByID(inc.ReadUInt16());
                     Character orderGiver = inc.ReadBoolean() ? FindEntityByID(inc.ReadUInt16()) as Character : null;
                     int orderOptionIndex = inc.ReadByte();
+                    int orderPriority = inc.ReadByte();
                     OrderTarget targetPosition = null;
                     if (inc.ReadBoolean())
                     {
@@ -470,7 +485,7 @@ namespace Barotrauma
                                 new Order(orderPrefab, targetPosition, orderGiver: orderGiver);
                             character.SetOrder(order,
                                 orderOptionIndex >= 0 && orderOptionIndex < orderPrefab.Options.Length ? orderPrefab.Options[orderOptionIndex] : null,
-                                orderGiver, speak: false);
+                                orderPriority, orderGiver, speak: false);
                         }
                         else
                         {
@@ -489,7 +504,7 @@ namespace Barotrauma
                     character.ReadStatus(inc);
                 }
 
-                if (character.IsHuman && character.TeamID != TeamType.FriendlyNPC && !character.IsDead)
+                if (character.IsHuman && character.TeamID != CharacterTeamType.FriendlyNPC && character.TeamID != CharacterTeamType.None && !character.IsDead)
                 {
                     CharacterInfo duplicateCharacterInfo = GameMain.GameSession.CrewManager.GetCharacterInfos().FirstOrDefault(c => c.ID == info.ID);
                     GameMain.GameSession.CrewManager.RemoveCharacterInfo(duplicateCharacterInfo);
@@ -503,6 +518,7 @@ namespace Barotrauma
                     if (!character.IsDead) { Controlled = character; }
 
                     GameMain.LightManager.LosEnabled = true;
+                    GameMain.LightManager.LosAlpha = 1f;
 
                     character.memInput.Clear();
                     character.memState.Clear();

@@ -628,6 +628,13 @@ namespace Barotrauma.Networking
             set;
         }
 
+        [Serialize(false, true)]
+        public bool LockAllDefaultWires
+        {
+            get;
+            set;
+        }
+
         [Serialize(true, true)]
         public bool AllowFriendlyFire
         {
@@ -787,7 +794,7 @@ namespace Barotrauma.Networking
             private set;
         }
 
-        [Serialize(120.0f, true)]
+        [Serialize(300.0f, true)]
         public float KillDisconnectedTime
         {
             get;
@@ -870,6 +877,13 @@ namespace Barotrauma.Networking
         {
             get;
             private set;
+        }
+
+        [Serialize(true, true)]
+        public bool RadiationEnabled
+        {
+            get;
+            set;
         }
 
         public void SetPassword(string password)

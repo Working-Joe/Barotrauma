@@ -35,7 +35,8 @@ namespace Barotrauma
         PursueIfCanAttack,
         Pursue,
         FollowThrough,
-        FollowThroughUntilCanAttack
+        FollowThroughUntilCanAttack,
+        IdleUntilCanAttack
     }
 
     struct AttackResult
@@ -117,11 +118,41 @@ namespace Barotrauma
         [Serialize(0f, true, description: "A random factor applied to all cooldowns. Example: 0.1 -> adds a random value between -10% and 10% of the cooldown. Min 0 (default), Max 1 (could disable or double the cooldown in extreme cases)."), Editable(MinValueFloat = 0, MaxValueFloat = 1, DecimalCount = 2)]
         public float CoolDownRandomFactor { get; private set; } = 0;
 
+        [Serialize(false, true), Editable]
+        public bool FullSpeedAfterAttack { get; private set; }
+
+        private float _structureDamage;
         [Serialize(0.0f, true), Editable(MinValueFloat = 0.0f, MaxValueFloat = 10000.0f)]
-        public float StructureDamage { get; set; }
+        public float StructureDamage
+        {
+            get => _structureDamage * DamageMultiplier;
+            set => _structureDamage = value;
+        }
+
+        private float _itemDamage;
+        [Serialize(0.0f, true), Editable(MinValueFloat = 0.0f, MaxValueFloat = 1000.0f)]
+        public float ItemDamage
+        {
+            get =>_itemDamage * DamageMultiplier;
+            set => _itemDamage = value;
+        }
+
+        /// <summary>
+        /// Currently only used with variants. Used for multiplying all the damage.
+        /// </summary>
+        public float DamageMultiplier { get; set; } = 1;
 
         [Serialize(0.0f, true), Editable(MinValueFloat = 0.0f, MaxValueFloat = 1000.0f)]
-        public float ItemDamage { get; set; }
+        public float LevelWallDamage { get; set; }
+
+        [Serialize(false, true)]
+        public bool Ranged { get; set; }
+
+        [Serialize(false, true, description:"Only affects ranged attacks.")]
+        public bool AvoidFriendlyFire { get; set; }
+
+        [Serialize(20f, true)]
+        public float RequiredAngle { get; set; }
 
         /// <summary>
         /// Legacy support. Use Afflictions.
@@ -186,6 +217,9 @@ namespace Barotrauma
         [Serialize("0.0, 0.0", true, description: "Applied to the target, in world space coordinates(i.e. 0, -1 pushes the target downwards). The attacker's facing direction is taken into account."), Editable]
         public Vector2 TargetForceWorld { get; private set; }
 
+        [Serialize(1.0f, true, description: "Affects the strength of the impact effects the limb causes when it hits a submarine."), Editable(MinValueFloat = 0.0f, MaxValueFloat = 100.0f)]
+        public float SubmarineImpactMultiplier { get; private set; }
+
         [Serialize(0.0f, true, description: "How likely the attack causes target limbs to be severed."), Editable(MinValueFloat = 0.0f, MaxValueFloat = 10.0f)]
         public float SeverLimbsProbability { get; set; }
 
@@ -196,6 +230,9 @@ namespace Barotrauma
 
         [Serialize(0.0f, true, description: ""), Editable(MinValueFloat = 0.0f, MaxValueFloat = 1.0f)]
         public float Priority { get; private set; }
+
+        [Serialize(false, true, description: ""), Editable]
+        public bool Blink { get; private set; }
 
         public IEnumerable<StatusEffect> StatusEffects
         {
@@ -247,6 +284,11 @@ namespace Barotrauma
             return (Duration == 0.0f) ? StructureDamage : StructureDamage * deltaTime;
         }
 
+        public float GetLevelWallDamage(float deltaTime)
+        {
+            return (Duration == 0.0f) ? LevelWallDamage : LevelWallDamage * deltaTime;
+        }
+
         public float GetItemDamage(float deltaTime)
         {
             return (Duration == 0.0f) ? ItemDamage : ItemDamage * deltaTime;
@@ -259,7 +301,7 @@ namespace Barotrauma
             {
                 totalDamage += affliction.GetVitalityDecrease(null);
             }
-            return totalDamage;
+            return totalDamage * DamageMultiplier;
         }
 
         public Attack(float damage, float bleedingDamage, float burnDamage, float structureDamage, float itemDamage, float range = 0.0f)
@@ -270,7 +312,7 @@ namespace Barotrauma
 
             Range = range;
             DamageRange = range;
-            StructureDamage = structureDamage;
+            StructureDamage = LevelWallDamage = structureDamage;
             ItemDamage = itemDamage;
         }
 
@@ -284,6 +326,13 @@ namespace Barotrauma
                 element.Attribute("bleedingdamage") != null)
             {
                 DebugConsole.ThrowError("Error in Attack (" + parentDebugName + ") - Define damage as afflictions instead of using the damage attribute (e.g. <Affliction identifier=\"internaldamage\" strength=\"10\" />).");
+            }
+
+            //if level wall damage is not defined, default to the structure damage
+            if (element.Attribute("LevelWallDamage") == null && 
+                element.Attribute("levelwalldamage") == null)
+            {
+                LevelWallDamage = StructureDamage;
             }
 
             InitProjSpecific(element);
@@ -379,7 +428,7 @@ namespace Barotrauma
             ReloadAfflictions(element);
         }
         
-        public AttackResult DoDamage(Character attacker, IDamageable target, Vector2 worldPosition, float deltaTime, bool playSound = true)
+        public AttackResult DoDamage(Character attacker, IDamageable target, Vector2 worldPosition, float deltaTime, bool playSound = true, PhysicsBody sourceBody = null)
         {
             Character targetCharacter = target as Character;
             if (OnlyHumans)
@@ -403,6 +452,7 @@ namespace Barotrauma
 
             foreach (StatusEffect effect in statusEffects)
             {
+                effect.sourceBody = sourceBody;
                 // TODO: do we want to apply the effect at the world position or the entity positions in each cases? -> go through also other cases where status effects are applied
                 if (effect.HasTargetType(StatusEffect.TargetType.This))
                 {
@@ -423,14 +473,18 @@ namespace Barotrauma
                         effect.Apply(effectType, deltaTime, targetCharacter, targetCharacter.AnimController.Limbs.Cast<ISerializableEntity>().ToList());
                     }
                 }
-                if (target is Entity entity)
+                if (target is Entity targetEntity)
                 {
                     if (effect.HasTargetType(StatusEffect.TargetType.NearbyItems) ||
                         effect.HasTargetType(StatusEffect.TargetType.NearbyCharacters))
                     {
                         var targets = new List<ISerializableEntity>();
                         effect.GetNearbyTargets(worldPosition, targets);
-                        effect.Apply(ActionType.OnActive, deltaTime, entity, targets);
+                        effect.Apply(effectType, deltaTime, targetEntity, targets);
+                    }
+                    if (effect.HasTargetType(StatusEffect.TargetType.UseTarget))
+                    {
+                        effect.Apply(effectType, deltaTime, targetEntity, attacker, worldPosition);
                     }
                 }
             }
@@ -438,7 +492,7 @@ namespace Barotrauma
             return attackResult;
         }
 
-        public AttackResult DoDamageToLimb(Character attacker, Limb targetLimb, Vector2 worldPosition, float deltaTime, bool playSound = true)
+        public AttackResult DoDamageToLimb(Character attacker, Limb targetLimb, Vector2 worldPosition, float deltaTime, bool playSound = true, PhysicsBody sourceBody = null)
         {
             if (targetLimb == null)
             {
@@ -462,6 +516,7 @@ namespace Barotrauma
 
             foreach (StatusEffect effect in statusEffects)
             {
+                effect.sourceBody = sourceBody;
                 if (effect.HasTargetType(StatusEffect.TargetType.This))
                 {
                     effect.Apply(effectType, deltaTime, attacker, attacker);
@@ -477,6 +532,17 @@ namespace Barotrauma
                 if (effect.HasTargetType(StatusEffect.TargetType.AllLimbs))
                 {
                     effect.Apply(effectType, deltaTime, targetLimb.character, targetLimb.character.AnimController.Limbs.Cast<ISerializableEntity>().ToList());
+                }
+                if (effect.HasTargetType(StatusEffect.TargetType.NearbyItems) ||
+                    effect.HasTargetType(StatusEffect.TargetType.NearbyCharacters))
+                {
+                    var targets = new List<ISerializableEntity>();
+                    effect.GetNearbyTargets(worldPosition, targets);
+                    effect.Apply(effectType, deltaTime, targetLimb.character, targets);
+                }
+                if (effect.HasTargetType(StatusEffect.TargetType.UseTarget))
+                {
+                    effect.Apply(effectType, deltaTime, targetLimb.character, attacker, worldPosition);
                 }
             }
 

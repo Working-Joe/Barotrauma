@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Xml.Linq;
+using Barotrauma.MapCreatures.Behavior;
 
 namespace Barotrauma
 {
@@ -391,14 +392,21 @@ namespace Barotrauma
 
         public List<DummyFireSource> FakeFireSources { get; private set; }
 
+        public BallastFloraBehavior BallastFlora { get; set; }
+
         public Hull(MapEntityPrefab prefab, Rectangle rectangle)
             : this (prefab, rectangle, Submarine.MainSub)
         {
-
+#if CLIENT
+            if (SubEditorScreen.IsSubEditor())
+            {
+                SubEditorScreen.StoreCommand(new AddOrDeleteCommand(new List<MapEntity> { this }, false));
+            }
+#endif
         }
 
-        public Hull(MapEntityPrefab prefab, Rectangle rectangle, Submarine submarine)
-            : base (prefab, submarine)
+        public Hull(MapEntityPrefab prefab, Rectangle rectangle, Submarine submarine, ushort id = Entity.NullEntityID)
+            : base (prefab, submarine, id)
         {
             rect = rectangle;
 
@@ -524,6 +532,8 @@ namespace Barotrauma
                 }
             }
             Pressure = rect.Y - rect.Height + waterVolume / rect.Width;
+            
+            BallastFlora?.OnMapLoaded();
         }
 
         public void AddToGrid(Submarine submarine)
@@ -607,6 +617,7 @@ namespace Barotrauma
         {
             base.Remove();
             hullList.Remove(this);
+            BallastFlora?.Remove();
 
             if (Submarine != null && !Submarine.Loading && !Submarine.Unloading)
             {
@@ -687,6 +698,9 @@ namespace Barotrauma
         public override void Update(float deltaTime, Camera cam)
         {
             base.Update(deltaTime, cam);
+            
+            BallastFlora?.Update(deltaTime);
+            
             UpdateProjSpecific(deltaTime, cam);
 
             Oxygen -= OxygenDeteriorationSpeed * deltaTime;
@@ -782,7 +796,7 @@ namespace Barotrauma
             //make waves propagate through horizontal gaps
             foreach (Gap gap in ConnectedGaps)
             {
-                if (this != gap.linkedTo[0] as Hull)
+                if (this != gap.linkedTo.FirstOrDefault() as Hull)
                 {
                     //let the first linked hull handle the water propagation
                     continue;
@@ -925,14 +939,14 @@ namespace Barotrauma
         /// Approximate distance from this hull to the target hull, moving through open gaps without passing through walls.
         /// Uses a greedy algo and may not use the most optimal path. Returns float.MaxValue if no path is found.
         /// </summary>
-        public float GetApproximateDistance(Vector2 startPos, Vector2 endPos, Hull targetHull, float maxDistance)
+        public float GetApproximateDistance(Vector2 startPos, Vector2 endPos, Hull targetHull, float maxDistance, float distanceMultiplierPerClosedDoor = 0)
         {
-            return GetApproximateHullDistance(startPos, endPos, new HashSet<Hull>(), targetHull, 0.0f, maxDistance);
+            return GetApproximateHullDistance(startPos, endPos, new HashSet<Hull>(), targetHull, 0.0f, maxDistance, distanceMultiplierPerClosedDoor);
         }
 
-        private float GetApproximateHullDistance(Vector2 startPos, Vector2 endPos, HashSet<Hull> connectedHulls, Hull target, float distance, float maxDistance)
+        private float GetApproximateHullDistance(Vector2 startPos, Vector2 endPos, HashSet<Hull> connectedHulls, Hull target, float distance, float maxDistance, float distanceMultiplierFromDoors = 0)
         {
-            if (distance >= maxDistance) return float.MaxValue;
+            if (distance >= maxDistance) { return float.MaxValue; }
             if (this == target)
             {
                 return distance + Vector2.Distance(startPos, endPos);
@@ -942,12 +956,17 @@ namespace Barotrauma
 
             foreach (Gap g in ConnectedGaps)
             {
+                float distanceMultiplier = 1;
                 if (g.ConnectedDoor != null && !g.ConnectedDoor.IsBroken)
                 {
                     //gap blocked if the door is not open or the predicted state is not open
                     if ((!g.ConnectedDoor.IsOpen && !g.ConnectedDoor.IsBroken) || (g.ConnectedDoor.PredictedState.HasValue && !g.ConnectedDoor.PredictedState.Value))
                     {
-                        if (g.ConnectedDoor.OpenState < 0.1f) continue;
+                        if (g.ConnectedDoor.OpenState < 0.1f)
+                        {
+                            if (distanceMultiplierFromDoors <= 0) { continue; }
+                            distanceMultiplier *= distanceMultiplierFromDoors;
+                        }
                     }
                 }
                 else if (g.Open <= 0.0f)
@@ -959,8 +978,11 @@ namespace Barotrauma
                 {
                     if (g.linkedTo[i] is Hull hull && !connectedHulls.Contains(hull))
                     {
-                        float dist = hull.GetApproximateHullDistance(g.Position, endPos, connectedHulls, target, distance + Vector2.Distance(startPos, g.Position), maxDistance);
-                        if (dist < float.MaxValue) { return dist; }
+                        float dist = hull.GetApproximateHullDistance(g.Position, endPos, connectedHulls, target, distance + Vector2.Distance(startPos, g.Position) * distanceMultiplier, maxDistance);
+                        if (dist < float.MaxValue)
+                        {
+                            return dist;
+                        }
                     }
                 }
             }
@@ -968,7 +990,13 @@ namespace Barotrauma
             return float.MaxValue;
         }
 
-        //returns the water block which contains the point (or null if it isn't inside any)
+        /// <summary>
+        /// Returns the hull which contains the point (or null if it isn't inside any)
+        /// </summary>
+        /// <param name="position">The position to check</param>
+        /// <param name="guess">This hull is checked first: if the current hull is known, this can be used as an optimization</param>
+        /// <param name="useWorldCoordinates">Should world coordinates or the sub's local coordinates be used?</param>
+        /// <param name="inclusive">Does being exactly at the edge of the hull count as being inside?</param>
         public static Hull FindHull(Vector2 position, Hull guess = null, bool useWorldCoordinates = true, bool inclusive = true)
         {
             if (EntityGrids == null) return null;
@@ -1016,20 +1044,19 @@ namespace Barotrauma
             return null;
         }
 
-        //returns the water block which contains the point (or null if it isn't inside any)
-        public static Hull FindHullOld(Vector2 position, Hull guess = null, bool useWorldCoordinates = true, bool inclusive = true)
+        /// <summary>
+        /// Returns the hull which contains the point (or null if it isn't inside any). The difference to FindHull is that this method goes through all hulls without trying
+        /// to first find the sub the point is inside and checking the hulls in that sub. 
+        /// = This is slower, use with caution in situations where the sub's extents or hulls may have changed after it was loaded.
+        /// </summary>
+        public static Hull FindHullUnoptimized(Vector2 position, Hull guess = null, bool useWorldCoordinates = true, bool inclusive = true)
         {
-            return FindHullOld(position, hullList, guess, useWorldCoordinates, inclusive);
-        }
-
-        public static Hull FindHullOld(Vector2 position, List<Hull> hulls, Hull guess = null, bool useWorldCoordinates = true, bool inclusive = true)
-        {
-            if (guess != null && hulls.Contains(guess))
+            if (guess != null && hullList.Contains(guess))
             {
                 if (Submarine.RectContains(useWorldCoordinates ? guess.WorldRect : guess.rect, position, inclusive)) return guess;
             }
 
-            foreach (Hull hull in hulls)
+            foreach (Hull hull in hullList)
             {
                 if (Submarine.RectContains(useWorldCoordinates ? hull.WorldRect : hull.rect, position, inclusive)) return hull;
             }
@@ -1352,7 +1379,7 @@ namespace Barotrauma
         }
 #endregion
 
-        public static Hull Load(XElement element, Submarine submarine)
+        public static Hull Load(XElement element, Submarine submarine, IdRemap idRemap)
         {
             Rectangle rect;
             if (element.Attribute("rect") != null)
@@ -1369,23 +1396,13 @@ namespace Barotrauma
                     int.Parse(element.Attribute("height").Value));
             }
 
-            var hull = new Hull(MapEntityPrefab.Find(null, "hull"), rect, submarine)
+            var hull = new Hull(MapEntityPrefab.Find(null, "hull"), rect, submarine, idRemap.GetOffsetId(element))
             {
-                WaterVolume = element.GetAttributeFloat("pressure", 0.0f),
-                ID = (ushort)int.Parse(element.Attribute("ID").Value)
+                WaterVolume = element.GetAttributeFloat("pressure", 0.0f)
             };
-            hull.OriginalID = hull.ID;
             hull.linkedToID = new List<ushort>();
 
-            string linkedToString = element.GetAttributeString("linked", "");
-            if (linkedToString != "")
-            {
-                string[] linkedToIds = linkedToString.Split(',');
-                for (int i = 0; i < linkedToIds.Length; i++)
-                {
-                    hull.linkedToID.Add((ushort)int.Parse(linkedToIds[i]));
-                }
-            }
+            hull.ParseLinks(element, idRemap);
 
             string originalAmbientLight = element.GetAttributeString("originalambientlight", null);
             if (!string.IsNullOrWhiteSpace(originalAmbientLight))
@@ -1408,6 +1425,15 @@ namespace Barotrauma
                         {
                             decal.FadeTimer = timer;
                             decal.BaseAlpha = baseAlpha;
+                        }
+                        break;
+                    case "ballastflorabehavior":
+                        string identifier = subElement.GetAttributeString("identifier", string.Empty);
+                        BallastFloraPrefab prefab = BallastFloraPrefab.Find(identifier);
+                        if (prefab != null)
+                        {
+                            hull.BallastFlora = new BallastFloraBehavior(hull, prefab, Vector2.Zero);
+                            hull.BallastFlora.LoadSave(subElement);
                         }
                         break;
                 }
@@ -1487,6 +1513,8 @@ namespace Barotrauma
                         new XAttribute("alpha", decal.BaseAlpha.ToString("G", CultureInfo.InvariantCulture))
                     ));
             }
+
+            BallastFlora?.Save(element);
 
             SerializableProperty.SerializeProperties(this, element);
             parentElement.Add(element);

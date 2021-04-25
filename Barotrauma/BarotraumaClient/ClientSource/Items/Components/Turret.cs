@@ -130,12 +130,15 @@ namespace Barotrauma.Items.Components
                 }
             }
             
-            powerIndicator = new GUIProgressBar(new RectTransform(new Vector2(0.18f, 0.03f), GUI.Canvas, Anchor.TopCenter)
+            powerIndicator = new GUIProgressBar(new RectTransform(new Vector2(0.18f, 0.03f), GUI.Canvas, Anchor.BottomCenter)
             {
-                MinSize = new Point(100,20),
+                MinSize = new Point(100, 20),
                 RelativeOffset = new Vector2(0.0f, 0.01f)
-            }, 
-            barSize: 0.0f, style: "DeviceProgressBar");
+            },
+            barSize: 0.0f, style: "DeviceProgressBar")
+            {
+                CanBeFocused = false
+            };
         }
 
         public override void Move(Vector2 amount)
@@ -181,14 +184,14 @@ namespace Barotrauma.Items.Components
             {
                 if (moveSoundChannel == null && startMoveSound != null)
                 {
-                    moveSoundChannel = SoundPlayer.PlaySound(startMoveSound.Sound, item.WorldPosition, startMoveSound.Volume, startMoveSound.Range);
+                    moveSoundChannel = SoundPlayer.PlaySound(startMoveSound.Sound, item.WorldPosition, startMoveSound.Volume, startMoveSound.Range, ignoreMuffling: startMoveSound.IgnoreMuffling);
                 }
                 else if (moveSoundChannel == null || !moveSoundChannel.IsPlaying)
                 {
                     if (moveSound != null)
                     {
                         moveSoundChannel.FadeOutAndDispose();
-                        moveSoundChannel = SoundPlayer.PlaySound(moveSound.Sound, item.WorldPosition, moveSound.Volume, moveSound.Range);
+                        moveSoundChannel = SoundPlayer.PlaySound(moveSound.Sound, item.WorldPosition, moveSound.Volume, moveSound.Range, ignoreMuffling: moveSound.IgnoreMuffling);
                         if (moveSoundChannel != null) moveSoundChannel.Looping = true;
                     }
                 }
@@ -200,7 +203,7 @@ namespace Barotrauma.Items.Components
                     if (endMoveSound != null && moveSoundChannel.Sound != endMoveSound.Sound)
                     {
                         moveSoundChannel.FadeOutAndDispose();
-                        moveSoundChannel = SoundPlayer.PlaySound(endMoveSound.Sound, item.WorldPosition, endMoveSound.Volume, endMoveSound.Range);
+                        moveSoundChannel = SoundPlayer.PlaySound(endMoveSound.Sound, item.WorldPosition, endMoveSound.Volume, endMoveSound.Range, ignoreMuffling: endMoveSound.IgnoreMuffling);
                         if (moveSoundChannel != null) moveSoundChannel.Looping = false;
                     }
                     else if (!moveSoundChannel.IsPlaying)
@@ -247,7 +250,7 @@ namespace Barotrauma.Items.Components
         
         public void Draw(SpriteBatch spriteBatch, bool editing = false, float itemDepth = -1)
         {
-            if (!MathUtils.NearlyEqual(item.Rotation, prevBaseRotation))
+            if (!MathUtils.NearlyEqual(item.Rotation, prevBaseRotation) || !MathUtils.NearlyEqual(item.Scale, prevScale))
             {
                 UpdateTransformedBarrelPos();
             }
@@ -288,73 +291,36 @@ namespace Barotrauma.Items.Components
 
             if (!editing || GUI.DisableHUD || !item.IsSelected) { return; }
 
-            float widgetRadius = 60.0f;
+            const float widgetRadius = 60.0f;
 
+            Vector2 center = new Vector2((float)Math.Cos((maxRotation + minRotation) / 2), (float)Math.Sin((maxRotation + minRotation) / 2));
             GUI.DrawLine(spriteBatch,
                 drawPos,
-                drawPos + new Vector2((float)Math.Cos(minRotation), (float)Math.Sin(minRotation)) * widgetRadius,
-                GUI.Style.Green);
-
-            GUI.DrawLine(spriteBatch,
-                drawPos,
-                drawPos + new Vector2((float)Math.Cos(maxRotation), (float)Math.Sin(maxRotation)) * widgetRadius,
-                GUI.Style.Green);
-
-            GUI.DrawLine(spriteBatch,
-                drawPos,
-                drawPos + new Vector2((float)Math.Cos((maxRotation + minRotation) / 2), (float)Math.Sin((maxRotation + minRotation) / 2)) * widgetRadius,
+                drawPos + center * widgetRadius,
                 Color.LightGreen);
 
-            Widget minRotationWidget = GetWidget("minrotation", spriteBatch, size: 10, initMethod: (widget) =>
+            const float coneRadius = 300.0f;
+            float radians = maxRotation - minRotation;
+            float circleRadius = coneRadius / Screen.Selected.Cam.Zoom * GUI.Scale;
+            float lineThickness = 1f / Screen.Selected.Cam.Zoom;
+
+            if (Math.Abs(minRotation - maxRotation) < 0.02f)
             {
-                 widget.Selected += () =>
-                 {
-                     oldRotation = RotationLimits;
-                 };
-                 widget.MouseDown += () =>
-                 {
-                     widget.color = GUI.Style.Green;
-                     prevAngle = minRotation;
-                 };
-                 widget.Deselected += () =>
-                 {
-                     widget.color = Color.Yellow;
-                     item.CreateEditingHUD();
-                     if (SubEditorScreen.IsSubEditor())
-                     {
-                         SubEditorScreen.StoreCommand(new PropertyCommand(this, "RotationLimits", RotationLimits, oldRotation));
-                     }
-                 };
-                 widget.MouseHeld += (deltaTime) =>
-                 {
-                     minRotation = GetRotationAngle(GetDrawPos());
-                     if (minRotation > maxRotation)
-                     {
-                         float temp = minRotation;
-                         minRotation = maxRotation;
-                         maxRotation = temp;
-                     }
-                     MapEntity.DisableSelect = true;
-                 };
-                 widget.PreUpdate += (deltaTime) =>
-                 {
-                     widget.DrawPos = new Vector2(widget.DrawPos.X, -widget.DrawPos.Y);
-                     widget.DrawPos = Screen.Selected.Cam.WorldToScreen(widget.DrawPos);
-                 };
-                 widget.PostUpdate += (deltaTime) =>
-                 {
-                     widget.DrawPos = Screen.Selected.Cam.ScreenToWorld(widget.DrawPos);
-                     widget.DrawPos = new Vector2(widget.DrawPos.X, -widget.DrawPos.Y);
-                 };
-                 widget.PreDraw += (sprtBtch, deltaTime) =>
-                 {
-                     widget.tooltip = "Min: " + (int)MathHelper.ToDegrees(minRotation);
-                     widget.DrawPos = GetDrawPos() + new Vector2((float)Math.Cos(minRotation), (float)Math.Sin(minRotation)) * widgetRadius;
-                     widget.Update(deltaTime);
-                 };
-            });
-            
-            Widget maxRotationWidget = GetWidget("maxrotation", spriteBatch, size: 10, initMethod: (widget) =>
+                spriteBatch.DrawLine(drawPos, drawPos + center * circleRadius, GUI.Style.Green, thickness: lineThickness);
+            }
+            else if (radians > Math.PI * 2)
+            {
+                spriteBatch.DrawCircle(drawPos, circleRadius, 180, GUI.Style.Red, thickness: lineThickness);
+            }
+            else
+            {
+                spriteBatch.DrawSector(drawPos, circleRadius, radians, (int)Math.Abs(90 * radians), GUI.Style.Green, offset: minRotation, thickness: lineThickness);
+            }
+
+            int baseWidgetScale = GUI.IntScale(16);
+            int widgetSize = (int) (Math.Max(baseWidgetScale, baseWidgetScale / Screen.Selected.Cam.Zoom));
+            float widgetThickness = Math.Max(1f, lineThickness);
+            Widget minRotationWidget = GetWidget("minrotation", spriteBatch, size: widgetSize, thickness: widgetThickness, initMethod: (widget) =>
             {
                 widget.Selected += () =>
                 {
@@ -369,6 +335,52 @@ namespace Barotrauma.Items.Components
                 {
                     widget.color = Color.Yellow;
                     item.CreateEditingHUD();
+                    RotationLimits = RotationLimits;
+                    if (SubEditorScreen.IsSubEditor())
+                    {
+                        SubEditorScreen.StoreCommand(new PropertyCommand(this, "RotationLimits", RotationLimits, oldRotation));
+                    }
+                };
+                widget.MouseHeld += (deltaTime) =>
+                {
+                    minRotation = GetRotationAngle(GetDrawPos());
+                    UpdateBarrel();
+                    MapEntity.DisableSelect = true;
+                };
+                widget.PreUpdate += (deltaTime) =>
+                {
+                    widget.DrawPos = new Vector2(widget.DrawPos.X, -widget.DrawPos.Y);
+                    widget.DrawPos = Screen.Selected.Cam.WorldToScreen(widget.DrawPos);
+                };
+                widget.PostUpdate += (deltaTime) =>
+                {
+                    widget.DrawPos = Screen.Selected.Cam.ScreenToWorld(widget.DrawPos);
+                    widget.DrawPos = new Vector2(widget.DrawPos.X, -widget.DrawPos.Y);
+                };
+                widget.PreDraw += (sprtBtch, deltaTime) =>
+                {
+                    widget.tooltip = "Min: " + (int)MathHelper.ToDegrees(minRotation);
+                    widget.DrawPos = GetDrawPos() + new Vector2((float)Math.Cos(minRotation), (float)Math.Sin(minRotation)) * coneRadius / Screen.Selected.Cam.Zoom * GUI.Scale;
+                    widget.Update(deltaTime);
+                };
+            });
+
+            Widget maxRotationWidget = GetWidget("maxrotation", spriteBatch, size: widgetSize, thickness: widgetThickness, initMethod: (widget) =>
+            {
+                widget.Selected += () =>
+                {
+                    oldRotation = RotationLimits;
+                };
+                widget.MouseDown += () =>
+                {
+                    widget.color = GUI.Style.Green;
+                    prevAngle = maxRotation;
+                };
+                widget.Deselected += () =>
+                {
+                    widget.color = Color.Yellow;
+                    item.CreateEditingHUD();
+                    RotationLimits = RotationLimits;
                     if (SubEditorScreen.IsSubEditor())
                     {
                         SubEditorScreen.StoreCommand(new PropertyCommand(this, "RotationLimits", RotationLimits, oldRotation));
@@ -377,12 +389,7 @@ namespace Barotrauma.Items.Components
                 widget.MouseHeld += (deltaTime) =>
                 {
                     maxRotation = GetRotationAngle(GetDrawPos());
-                    if (minRotation > maxRotation)
-                    {
-                        float temp = minRotation;
-                        minRotation = maxRotation;
-                        maxRotation = temp;
-                    }
+                    UpdateBarrel();
                     MapEntity.DisableSelect = true;
                 };
                 widget.PreUpdate += (deltaTime) =>
@@ -398,7 +405,7 @@ namespace Barotrauma.Items.Components
                 widget.PreDraw += (sprtBtch, deltaTime) =>
                 {
                     widget.tooltip = "Max: " + (int)MathHelper.ToDegrees(maxRotation);
-                    widget.DrawPos = GetDrawPos() + new Vector2((float)Math.Cos(maxRotation), (float)Math.Sin(maxRotation)) * widgetRadius;
+                    widget.DrawPos = GetDrawPos() + new Vector2((float)Math.Cos(maxRotation), (float)Math.Sin(maxRotation)) * coneRadius / Screen.Selected.Cam.Zoom * GUI.Scale;
                     widget.Update(deltaTime);
                 };
             });
@@ -412,22 +419,32 @@ namespace Barotrauma.Items.Components
                 drawPos.Y = -drawPos.Y;
                 return drawPos;
             }
+
+            void UpdateBarrel()
+            {
+                rotation = (minRotation + maxRotation) / 2;
+            }
         }
 
-        private Widget GetWidget(string id, SpriteBatch spriteBatch, int size = 5, Action<Widget> initMethod = null)
+        private Widget GetWidget(string id, SpriteBatch spriteBatch, int size = 5, float thickness = 1f, Action<Widget> initMethod = null)
         {
+            Vector2 offset = new Vector2(size / 2 + 5, -10);
             if (!widgets.TryGetValue(id, out Widget widget))
             {
                 widget = new Widget(id, size, Widget.Shape.Rectangle)
                 {
                     color = Color.Yellow,
-                    tooltipOffset = new Vector2(size / 2 + 5, -10),
+                    tooltipOffset = offset,
                     inputAreaMargin = 20,
                     RequireMouseOn = false
                 };
                 widgets.Add(id, widget);
                 initMethod?.Invoke(widget);
             }
+
+            widget.size = size;
+            widget.tooltipOffset = offset;
+            widget.thickness = thickness;
             return widget;
         }
 
@@ -482,15 +499,16 @@ namespace Barotrauma.Items.Components
             List<Item> availableAmmo = new List<Item>();
             foreach (MapEntity e in item.linkedTo)
             {
-                var linkedItem = e as Item;
-                if (linkedItem == null) continue;
-
+                if (!(e is Item linkedItem)) { continue; }
                 var itemContainer = linkedItem.GetComponent<ItemContainer>();
-                if (itemContainer?.Inventory?.Items == null) continue;   
-                
-                availableAmmo.AddRange(itemContainer.Inventory.Items);                
-            }            
-                        
+                if (itemContainer == null) { continue; }
+                availableAmmo.AddRange(itemContainer.Inventory.AllItems);
+                for (int i = 0; i < itemContainer.Inventory.Capacity - itemContainer.Inventory.AllItems.Count(); i++)
+                {
+                    availableAmmo.Add(null);
+                }
+            }
+
             float chargeRate = 
                 powerConsumption <= 0.0f ? 
                 1.0f : 
@@ -522,15 +540,16 @@ namespace Barotrauma.Items.Components
             if (ShowProjectileIndicator)
             {
                 Point slotSize = (Inventory.SlotSpriteSmall.size * Inventory.UIScale).ToPoint();
-                int spacing = 5;
+                Point spacing = new Point(GUI.IntScale(5), GUI.IntScale(20));
                 int slotsPerRow = Math.Min(availableAmmo.Count, 6);
-                int totalWidth = slotSize.X * slotsPerRow + spacing * (slotsPerRow - 1);
-                Point invSlotPos = new Point(GameMain.GraphicsWidth / 2 - totalWidth / 2, (int)(60 * GUI.Scale));
+                int totalWidth = slotSize.X * slotsPerRow + spacing.X * (slotsPerRow - 1);
+                int rows = (int)Math.Ceiling(availableAmmo.Count / (float)slotsPerRow);
+                Point invSlotPos = new Point(GameMain.GraphicsWidth / 2 - totalWidth / 2, powerIndicator.Rect.Y - (slotSize.Y + spacing.Y) * rows);
                 for (int i = 0; i < availableAmmo.Count; i++)
                 {
                     // TODO: Optimize? Creates multiple new objects per frame?
                     Inventory.DrawSlot(spriteBatch, null,
-                        new InventorySlot(new Rectangle(invSlotPos + new Point((i % slotsPerRow) * (slotSize.X + spacing), (int)Math.Floor(i / (float)slotsPerRow) * (slotSize.Y + spacing)), slotSize)),
+                        new VisualSlot(new Rectangle(invSlotPos + new Point((i % slotsPerRow) * (slotSize.X + spacing.X), (int)Math.Floor(i / (float)slotsPerRow) * (slotSize.Y + spacing.Y)), slotSize)),
                         availableAmmo[i], -1, true);
                 }
                 if (flashNoAmmo)
@@ -569,7 +588,7 @@ namespace Barotrauma.Items.Components
             //ID ushort.MaxValue = launched without a projectile
             if (projectileID == ushort.MaxValue)
             {
-                Launch(null);
+                Launch(null, user);
             }
             else
             {
@@ -578,9 +597,8 @@ namespace Barotrauma.Items.Components
                     DebugConsole.ThrowError("Failed to launch a projectile - item with the ID \"" + projectileID + " not found");
                     return;
                 }
-                Launch(projectile, launchRotation: newTargetRotation);
+                Launch(projectile, user, launchRotation: newTargetRotation);
             }
-
         }
     }
 }

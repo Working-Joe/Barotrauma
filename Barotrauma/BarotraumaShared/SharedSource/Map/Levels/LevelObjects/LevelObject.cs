@@ -37,17 +37,26 @@ namespace Barotrauma
 
         public bool NeedsNetworkSyncing
         {
-            get { return Triggers.Any(t => t.NeedsNetworkSyncing); }
-            set { Triggers.ForEach(t => t.NeedsNetworkSyncing = false); }
+            get { return Triggers != null && Triggers.Any(t => t.NeedsNetworkSyncing); }
+            set 
+            {
+                if (Triggers == null) { return; }
+                Triggers.ForEach(t => t.NeedsNetworkSyncing = false); 
+            }
+        }
+
+        public bool NeedsUpdate
+        {
+            get; private set;
         }
 
         public Sprite Sprite
         {
-            get { return spriteIndex < 0 || Prefab.Sprites.Count == 0 ? null : Prefab.Sprites[spriteIndex % Prefab.Sprites.Count]; }
-        }
-        public Sprite SpecularSprite
-        {
-            get { return spriteIndex < 0 || Prefab.SpecularSprites.Count == 0 ? null : Prefab.SpecularSprites[spriteIndex % Prefab.SpecularSprites.Count]; }
+            get 
+            {
+                var prefab = ActivePrefab?.Sprites.Count > 0 ? ActivePrefab : Prefab;
+                return spriteIndex < 0 || prefab.Sprites.Count == 0 ? null : prefab.Sprites[spriteIndex % prefab.Sprites.Count]; 
+            }
         }
 
         Vector2 ISpatialEntity.Position => new Vector2(Position.X, Position.Y);
@@ -58,10 +67,10 @@ namespace Barotrauma
 
         public Submarine Submarine => null;
 
+        public Level.Cave ParentCave;
+
         public LevelObject(LevelObjectPrefab prefab, Vector3 position, float scale, float rotation = 0.0f)
         {
-            Triggers = new List<LevelTrigger>();
-
             ActivePrefab = Prefab = prefab;
             Position = position;
             Scale = scale;
@@ -69,13 +78,26 @@ namespace Barotrauma
 
             spriteIndex = ActivePrefab.Sprites.Any() ? Rand.Int(ActivePrefab.Sprites.Count, Rand.RandSync.Server) : -1;
 
-            if (prefab.PhysicsBodyElement != null)
+            if (Sprite != null && prefab.SpriteSpecificPhysicsBodyElements.ContainsKey(Sprite))
+            {
+                PhysicsBody = new PhysicsBody(prefab.SpriteSpecificPhysicsBodyElements[Sprite], ConvertUnits.ToSimUnits(new Vector2(position.X, position.Y)), Scale);
+            }
+            else if (prefab.PhysicsBodyElement != null)
             {
                 PhysicsBody = new PhysicsBody(prefab.PhysicsBodyElement, ConvertUnits.ToSimUnits(new Vector2(position.X, position.Y)), Scale);
             }
 
+            if (PhysicsBody != null)
+            {
+                PhysicsBody.SetTransformIgnoreContacts(PhysicsBody.SimPosition, -Rotation);
+                PhysicsBody.BodyType = BodyType.Static;
+                PhysicsBody.CollisionCategories = Physics.CollisionLevel;
+                PhysicsBody.CollidesWith = Physics.CollisionWall | Physics.CollisionCharacter;
+            }
+
             foreach (XElement triggerElement in prefab.LevelTriggerElements)
             {
+                Triggers ??= new List<LevelTrigger>();
                 Vector2 triggerPosition = triggerElement.GetAttributeVector2("position", Vector2.Zero) * scale;
 
                 if (rotation != 0.0f)
@@ -90,9 +112,24 @@ namespace Barotrauma
 
                 var newTrigger = new LevelTrigger(triggerElement, new Vector2(position.X, position.Y) + triggerPosition, -rotation, scale, prefab.Name);
                 int parentTriggerIndex = prefab.LevelTriggerElements.IndexOf(triggerElement.Parent);
-                if (parentTriggerIndex > -1) newTrigger.ParentTrigger = Triggers[parentTriggerIndex];
+                if (parentTriggerIndex > -1) { newTrigger.ParentTrigger = Triggers[parentTriggerIndex]; }
                 Triggers.Add(newTrigger);
             }
+
+            if (spriteIndex == -1)
+            {
+                foreach (var overrideProperties in prefab.OverrideProperties)
+                {
+                    if (overrideProperties == null) { continue; }
+                    if (overrideProperties.Sprites.Count > 0)
+                    {
+                        spriteIndex = Rand.Int(overrideProperties.Sprites.Count, Rand.RandSync.Server);
+                        break;
+                    }
+                }
+            }
+
+            NeedsUpdate = NeedsNetworkSyncing || (Triggers != null && Triggers.Any()) || Prefab.PhysicsBodyTriggerIndex > -1;
 
             InitProjSpecific();
         }
@@ -131,9 +168,10 @@ namespace Barotrauma
 
         public void ServerWrite(IWriteMessage msg, Client c)
         {
+            if (Triggers == null) { return; }
             for (int j = 0; j < Triggers.Count; j++)
             {
-                if (!Triggers[j].UseNetworkSyncing) continue;
+                if (!Triggers[j].UseNetworkSyncing) { continue; }
                 Triggers[j].ServerWrite(msg, c);
             }
         }
